@@ -247,7 +247,8 @@ class DailySet:
         time.sleep(random.uniform(2.5, 4))
 
         final_cards = [
-            c for c in driver.find_elements(By.CSS_SELECTOR, selector)
+            c
+            for c in driver.find_elements(By.CSS_SELECTOR, selector)
             if self.cards.is_visible(c)
         ]
         if not final_cards:
@@ -346,7 +347,11 @@ class DailySet:
                     self._log("Stop requested — skipping remaining sections.")
                     break
                 section_result = self._process_section(
-                    driver, human, section_name, selector, main_tab,
+                    driver,
+                    human,
+                    section_name,
+                    selector,
+                    main_tab,
                     stop_event=stop_event,
                 )
                 for k in totals:
