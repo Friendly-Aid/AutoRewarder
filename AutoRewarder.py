@@ -61,7 +61,7 @@ if __name__ == "__main__":
 
     def _install_tray(app_window):
         try:
-            import pystray
+            import pystray  # type: ignore
             from PIL import Image
         except Exception as e:
             print(f"[WARNING] Tray disabled: {e}")
