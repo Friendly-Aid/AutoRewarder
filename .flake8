@@ -1,0 +1,7 @@
+[flake8]
+max-line-length = 140
+
+# card_js.py embeds JS regex literals as Python triple-quoted strings;
+# the regex bodies must stay on one line for the JS engine to parse them.
+per-file-ignores =
+    src/dailytasks/card_js.py: E501
