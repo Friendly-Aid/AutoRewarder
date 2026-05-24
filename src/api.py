@@ -986,7 +986,8 @@ class AutoRewarderAPI:
             if self._sleep_with_stop(sleep_time):
                 break
 
-        self.log("Advanced scheduled run complete.")
+        if not self._stop_event.is_set() and pc_left <= 0 and mobile_left <= 0:
+            self.log("Advanced schedule completed!")
 
     def main(self, pc_count, mobile_count=0, daily_only=False):
         """
