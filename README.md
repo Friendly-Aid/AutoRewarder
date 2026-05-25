@@ -1,7 +1,7 @@
 # AutoRewarder
 
 ![Stars](https://img.shields.io/github/stars/safarsin/AutoRewarder?style=for-the-badge)
-![Downloads](https://img.shields.io/github/downloads/safarsin/AutoRewarder/total?style=for-the-badge&color=007ac)
+![Downloads](https://img.shields.io/github/downloads/safarsin/AutoRewarder/total?style=for-the-badge&color=#3FB950)
 
 An advanced, set-and-forget automation tool for Microsoft Rewards. AutoRewarder performs Bing searches for PC and mobile point collection, collects Daily Sets, and uses mathematically driven, human-like input simulation (W3C Actions, Bezier curves, and smart scrolling).
 
@@ -26,6 +26,9 @@ Built with a robust Python/Selenium backend, it offers two modes of operation: a
 - [Runtime Data](#runtime-data)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
+- [Disclaimer](#disclaimer)
+- [Contact](#contact)
+- [Support](#support)
 
 ---
 
@@ -47,7 +50,7 @@ Clone this repo, create virtual environment, and run `python AutoRewarder.py`.
 
 | Perform Searches | App Demo |
 | :---: | :---: |
-|<img src="assets/screenshots/perform_demo.gif">|<img src="assets/screenshots/main_demo.gif">|
+|<img src="assets/screenshots/perform_demo.gif">|<img src="assets/screenshots/main_window_demo_3.3.gif">|
 
 |Daily Sets| Tab Switching |
 | :---: | :---: |
@@ -57,7 +60,7 @@ Clone this repo, create virtual environment, and run `python AutoRewarder.py`.
 
 | Main Window | Settings & History |
 | :---: | :---: |
-| <img src="assets/screenshots/main_2.png"> | <img src="assets/screenshots/history_window.png"> |
+| <img src="assets/screenshots/main_window_3.3.png"> | <img src="assets/screenshots/history_window.png"> |
 | <img src="assets/screenshots/main_1.png"> | <img src="assets/screenshots/settings.jpg"> |
 
 ---
@@ -209,9 +212,9 @@ AutoRewarder/
 │   ├── styles.css        # App styling
 │   └── normalize.css     # CSS reset
 ├── assets/
-│   ├── icon.ico          # App icon
-│   ├── queries.json      # Queries list (8154 unique queries)
-│   └── screenshots/      # Screenshots and GIFs for documentation
+│   ├── icon.ico                   # App icon
+│   ├── queries.json               # Queries list (8154 unique queries)
+│   └── screenshots/               # Screenshots and GIFs for documentation
 ├── src/
 │   ├── __init__.py       # Python package initialization
 │   ├── api.py            # Centralizes all main operations (bridge API exposed to JS)
