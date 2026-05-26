@@ -493,47 +493,78 @@ class AutoRewarderAPI:
                 pass
         return False
 
+    # Bumped whenever the format of registered scheduled tasks changes in
+    # a way that requires re-creating existing tasks on disk (e.g. v1
+    # switched dev-mode commands from python.exe to pythonw.exe to avoid
+    # the console-window flash). Stored in global_settings as
+    # `autostart_schema_version`. Users on autoStartUp=True with a lower
+    # version get all their tasks re-registered on next launch.
+    _AUTOSTART_SCHEMA_VERSION = 1
+
     def _migrate_legacy_autostart(self):
         """
-        Detect any pre-per-account autostart artifact and clean it up.
+        Cover three migration paths on every app launch:
 
-        Two situations:
-          * `autoStartUp` is False AND legacy detected → the user had
-            autostart on under the old model; persist intent, run
-            cleanup, and register per-account tasks for every enabled
-            account.
-          * `autoStartUp` is True AND legacy detected → the user is
-            already on the per-account model but a stale legacy entry
-            survived a previous migration (e.g. a silently-failed
-            schtasks delete). Just run cleanup; don't touch per-account
-            tasks.
+        1. Legacy fire-on-login / single-task scheduler exists AND user
+           is not yet on the per-account model → full migration:
+           cleanup + register per-account tasks.
+        2. Legacy artifact exists AND user is already on per-account →
+           idempotent cleanup; per-account tasks left untouched.
+        3. User is on per-account model AND `autostart_schema_version`
+           is below current → re-register every task so format changes
+           (e.g. python.exe → pythonw.exe) take effect without the user
+           having to toggle anything.
 
         Failures are logged but swallowed — a stale legacy entry is
         not worth crashing app startup.
         """
-        if not self._detect_legacy_autostart():
-            return
-
+        legacy = self._detect_legacy_autostart()
         try:
-            already_on_new_model = bool(
-                self.global_settings.get_settings().get("autoStartUp", False)
-            )
+            settings = self.global_settings.get_settings()
+            autostartup = bool(settings.get("autoStartUp", False))
+            schema_v = int(settings.get("autostart_schema_version", 0))
         except Exception:
-            already_on_new_model = False
-
-        if already_on_new_model:
-            self._safe_log("Cleaning up stale legacy autostart entries...")
-            try:
-                self._cleanup_legacy_autostart()
-            except Exception as e:
-                self._safe_log(f"[WARNING] Legacy cleanup failed: {e}")
             return
 
-        self._safe_log("Migrating legacy autostart entry to per-account daily tasks...")
+        needs_resync = autostartup and schema_v < self._AUTOSTART_SCHEMA_VERSION
+
+        if not legacy and not needs_resync:
+            return
+
+        # Path 1: full migration from legacy to per-account.
+        if legacy and not autostartup:
+            self._safe_log(
+                "Migrating legacy autostart entry to per-account daily tasks..."
+            )
+            try:
+                self._set_autostart_registry(True)
+            except Exception as e:
+                self._safe_log(f"[WARNING] Autostart migration failed: {e}")
+        else:
+            # Path 2: idempotent legacy cleanup.
+            if legacy:
+                self._safe_log("Cleaning up stale legacy autostart entries...")
+                try:
+                    self._cleanup_legacy_autostart()
+                except Exception as e:
+                    self._safe_log(f"[WARNING] Legacy cleanup failed: {e}")
+            # Path 3: re-register tasks under the current schema.
+            if needs_resync:
+                self._safe_log(
+                    f"Refreshing per-account scheduled tasks (schema v{self._AUTOSTART_SCHEMA_VERSION})..."
+                )
+                try:
+                    self._sync_all_autostart()
+                except Exception as e:
+                    self._safe_log(f"[WARNING] Autostart refresh failed: {e}")
+
+        # Mark current schema applied so we don't re-run unnecessarily.
         try:
-            self._set_autostart_registry(True)
-        except Exception as e:
-            self._safe_log(f"[WARNING] Autostart migration failed: {e}")
+            settings = self.global_settings.get_settings()
+            settings["autostart_schema_version"] = self._AUTOSTART_SCHEMA_VERSION
+            self.global_settings.save_settings(settings)
+        except Exception:
+            pass
 
     # ---- Autostart (OS-level) — ported from v3.1 main -----------------
 
@@ -552,11 +583,23 @@ class AutoRewarderAPI:
                 whether the app is frozen (packaged) or running in development mode.
         """
         # Frozen build: call the bundled exe with --headless --account <id>.
+        # PyInstaller's `console=False` in AutoRewarder.spec means the exe
+        # itself has no console, so this fires silently.
         if getattr(sys, "frozen", False):
             return f'"{sys.executable}" --headless --account {account_id}'
-        # Dev: call python on the entry script.
+
+        # Dev mode: prefer pythonw.exe on Windows. python.exe is the console
+        # variant, so when Task Scheduler fires it Windows allocates a
+        # console window — visible flash at every trigger. pythonw.exe is
+        # the same interpreter without that console. Falls back to whatever
+        # sys.executable is if pythonw isn't there (custom layout).
+        python_exe = sys.executable
+        if platform.system() == "Windows":
+            candidate = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+            if os.path.exists(candidate):
+                python_exe = candidate
         entry = os.path.join(BASE_DIR, "AutoRewarder.py")
-        return f'"{sys.executable}" "{entry}" --headless --account {account_id}'
+        return f'"{python_exe}" "{entry}" --headless --account {account_id}'
 
     # ---- Per-account OS-task naming -----------------------------------
 
