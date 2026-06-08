@@ -581,7 +581,7 @@ function open_settings_modal() {
     } else {
       startupRow.classList.remove('row-disabled');
       startupToggle.disabled = false;
-      startupHint.textContent = "Run AutoRewarder automatically in the background every day, at each account's scheduled time.";
+      startupHint.textContent = "Automatically run AutoRewarder in the background at each account's scheduled time.";
     }
 
     // Close-to-tray toggle — default to true if the API failed.
