@@ -57,6 +57,24 @@ if __name__ == "__main__":
     )
     api.set_window(window)  # pass window reference to AutoRewarderAPI for logging
 
+    # Secondary windows (History, Statistics) are independent pywebview windows.
+    # pywebview keeps the process alive as long as ANY window is open, so once
+    # the main window is genuinely closed — the X with close-to-tray off, or
+    # "Exit" from the tray — we must tear the others down too, otherwise they
+    # stay on screen and the app never actually quits. The `closed` event only
+    # fires on a real close (the tray "hide" path returns from `closing`
+    # without closing), so this is the right hook.
+    def _destroy_secondary_windows(*_args):
+        for other in list(webview.windows):
+            if other is not window:
+                try:
+                    other.destroy()
+                except Exception:
+                    pass
+
+    if window is not None:
+        window.events.closed += _destroy_secondary_windows
+
     # User-controlled: when False, the X button quits the app normally and
     # we don't install the tray at all. Read once at startup — flipping the
     # toggle in Settings takes effect on next launch (consistent with how

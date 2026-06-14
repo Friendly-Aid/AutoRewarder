@@ -385,6 +385,63 @@ function show_history() {
   pywebview.api.open_history_window();
 }
 
+function show_stats() {
+  if (!window.pywebview || !pywebview.api || !pywebview.api.open_stats_window) return;
+  pywebview.api.open_stats_window();
+}
+
+/**
+ * Format a points number for the compact card: thousands separators, with a
+ * leading "~" when the figure is an estimate (no real balance scraped yet).
+ */
+function _fmt_points(value, isEstimate) {
+  if (value == null || isNaN(value)) return '—';
+  const sign = value > 0 && isEstimate === 'delta' ? '+' : '';
+  const prefix = (isEstimate === true && value > 0) ? '~' : '';
+  return prefix + sign + Number(value).toLocaleString();
+}
+
+/**
+ * Toggle the compact stats card's "searching" animation. Called from Python
+ * while it scrapes the real balance (at launch, or on a manual refresh).
+ */
+function set_stats_loading(on) {
+  const card = document.getElementById('stats_card');
+  if (card) card.classList.toggle('stats-loading', Boolean(on));
+}
+
+/**
+ * Refresh the compact stats card for the current account. Called on load,
+ * after switching accounts, and (from Python) at the end of every run.
+ */
+function refresh_stats_ui() {
+  if (!window.pywebview || !pywebview.api || !pywebview.api.get_stats) return;
+  const totalEl = document.getElementById('stat_total');
+  const sessionEl = document.getElementById('stat_session');
+  const totalLabel = document.getElementById('stat_total_label');
+
+  pywebview.api.get_stats().then(function (stats) {
+    if (!stats || !stats.derived) {
+      if (totalEl) totalEl.textContent = '—';
+      if (sessionEl) sessionEl.textContent = '—';
+      if (totalLabel) totalLabel.textContent = 'Total points';
+      return;
+    }
+    const d = stats.derived;
+    if (totalEl) totalEl.textContent = _fmt_points(d.total_points, d.is_estimate);
+    if (totalLabel) {
+      totalLabel.textContent = d.is_estimate ? 'Total points (est.)' : 'Total points';
+    }
+    if (sessionEl) {
+      // Show the real balance delta as a signed "+N"; estimates get a "~".
+      const flag = d.session_is_estimate ? true : 'delta';
+      sessionEl.textContent = _fmt_points(d.session_points, flag);
+    }
+  }).catch(function (err) {
+    console.error('refresh_stats_ui failed:', err);
+  });
+}
+
 function set_hide_browser_toggle_enabled(enabled) {
   const toggle = document.getElementById('hideBrowserToggle');
   if (!toggle) return;
@@ -985,6 +1042,9 @@ function refresh_account_ui() {
     }
 
     update_status_indicator();
+
+    // Stats are per-account — refresh the compact card for the new selection.
+    refresh_stats_ui();
 
     // Re-render the accounts management modal list if open.
     if (typeof render_accounts_section === 'function') {
