@@ -270,7 +270,9 @@ function start_bot() {
 
   // Save the query counts to global settings before running.
   if (!dailyOnly) {
-    pywebview.api.set_queries_counts(pc, mobile).catch(err => {
+    pywebview.api.set_queries_counts(pc, mobile).then(ok => {
+      if (!ok) console.error('Failed to save query counts (backend returned false).');
+    }).catch(err => {
       console.error('Failed to save query counts:', err);
     });
   }
@@ -302,7 +304,9 @@ document.addEventListener('DOMContentLoaded', function () {
       const pc = parseInt(pcField.value, 10);
       const mobile = parseInt(mobileField.value, 10);
       if (!isNaN(pc) && !isNaN(mobile) && pc >= 0 && pc <= 130 && mobile >= 0 && mobile <= 99) {
-        pywebview.api.set_queries_counts(pc, mobile).catch(err => {
+        pywebview.api.set_queries_counts(pc, mobile).then(ok => {
+          if (!ok) console.error('Failed to auto-save query counts (backend returned false).');
+        }).catch(err => {
           console.error('Failed to auto-save query counts:', err);
         });
       }

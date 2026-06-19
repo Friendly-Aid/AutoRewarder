@@ -329,9 +329,21 @@ class AutoRewarderAPI:
             bool: True if successfully saved, False otherwise.
         """
         try:
+            before = (
+                self.global_settings.get_queries_pc(),
+                self.global_settings.get_queries_mobile(),
+            )
+
             self.global_settings.set_queries_pc(queries_pc)
             self.global_settings.set_queries_mobile(queries_mobile)
-            self.log(f"Search counts saved: PC={queries_pc}, Mobile={queries_mobile}")
+
+            after = (
+                self.global_settings.get_queries_pc(),
+                self.global_settings.get_queries_mobile(),
+            )
+
+            if after != before:
+                self.log(f"Search counts saved: PC={after[0]}, Mobile={after[1]}")
             return True
         except Exception as e:
             self.log(f"[WARNING] Failed to save search counts: {e}")
