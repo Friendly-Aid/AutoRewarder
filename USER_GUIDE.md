@@ -23,7 +23,7 @@ Welcome! This guide will help you get started with AutoRewarder and explain all 
 
 ### Step 1: Download
 1. Go to the [Releases page](https://github.com/safarsin/AutoRewarder/releases) on GitHub
-2. Find the latest release (v3.3 or newer)
+2. Find the latest release (v3.4 or newer)
 3. Download `AutoRewarder-Setup.exe`
 
 ### Step 2: Install
@@ -100,7 +100,7 @@ Adding another account is slightly different, so please follow these steps:
 
 1. Open AutoRewarder.exe
 2. Select an account from the dropdown
-3. Set PC and Mobile query counts (PC 0-130, Mobile 0-99). Set one to 0 to skip it
+3. Set PC and Mobile query counts (PC 0-130, Mobile 0-99). Set one to 0 to skip it. Your preferred search limits are saved automatically and will load on your next launch.
 4. *(Optional)* Toggle **"Daily tasks only"** to skip searches and only collect dashboard click-through tasks
 5. Click the **"Start run"** button
 6. Watch the status indicator show that AutoRewarder is working
@@ -117,7 +117,7 @@ Adding another account is slightly different, so please follow these steps:
 - It runs the PC phase first, then the Mobile phase (iPhone emulation)
 - It may occasionally switch to Images/Videos/News tabs
 - It may take short "coffee breaks" during longer sessions
-- If Schedule is enabled and Advanced scheduling is on, the run is paced across the schedule duration using the queries-per-hour target
+- If Schedule is enabled and Advanced scheduling is on, the run is paced across the schedule duration using the queries-per-hour target. You will see a clear "Done!" message in the logs when the advanced scheduling run fully completes.
 - After the PC phase, it collects Daily Set + "More Activities" click-through tasks (once per day, per account). Locked cards, sweepstakes and promo banners are automatically skipped — only point-earning tasks are clicked
 - The process continues until all searches are complete, or until you click **Stop**
 - You'll see updates in the log window
@@ -151,20 +151,21 @@ This toggle controls whether you can see Microsoft Edge while searches are happe
 - Less distracting if you're working on something else
 - Slightly faster performance since it doesn't have to render the browser window what will save system resources (RAM/CPU)
 
-### Autostart
+### Autostart & Daily Run Time
+When enabled, AutoRewarder uses your operating system's native task scheduler (Windows Task Scheduler or Linux systemd) to launch headless runs in the background.
 
-When enabled, AutoRewarder will launch headless runs when you sign in. On Linux (source installs), it creates a desktop autostart entry.
+- **Independent Schedules:** You can set a specific **Daily run time** (HH:MM) for each account individually in their respective settings cards.
+- **Missed Run Catch-up:** If your computer is turned off or asleep during a scheduled time, the run is not lost. The system will automatically catch up and execute the task a few minutes after your next boot.
+- **Smart Deduplication:** If you manually start a run before a delayed catch-up task fires, AutoRewarder detects this and safely skips the scheduled run to prevent double execution.
 
-If you want to disable this setting, simply turn it off and save settings. Or remove AutoRewarder from Windows Startup here:
+To disable automated runs, simply turn off the global Schedule toggle or remove specific accounts from the schedule.
 
-<img src="assets/screenshots/start-up.png" width="400">
+### System Tray & Application Exit
+By default, clicking the "X" on the main window sends AutoRewarder to the system tray. This allows the application to remain active for background tasks.
 
-### System Tray (Close to tray)
-
-When you close the main window, AutoRewarder keeps running in the system tray.
-
-- Click the tray icon to reopen the window
-- Use **Exit** in the tray menu to fully close the app
+- You can click the tray icon to reopen the interface, or right-click it and select **Exit** to fully terminate the process.
+- **Close to tray toggle:** If you prefer the application to completely shut down when you click the "X" button, disable the **"Close to tray"** option in the General Settings.
+- *Note: Changing the "Close to tray" setting requires an application restart to take effect.*
 
 ### How to check if it's running or stop it (Task Manager)
 
@@ -331,7 +332,7 @@ A: Currently, the pre-built installer and standalone executable are only availab
 
 ---
 
-**Last Updated**: May 2026
-**Version**: 3.3
+**Last Updated**: June 2026
+**Version**: 3.4
 
 Enjoy using AutoRewarder! 🎉
