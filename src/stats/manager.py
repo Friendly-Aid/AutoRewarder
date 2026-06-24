@@ -27,8 +27,10 @@ from datetime import datetime
 POINTS_PER_SEARCH = 3
 POINTS_PER_CARD = 10
 
-# How many recent run records to retain for the dashboard timeline.
-_MAX_RUN_RECORDS = 120
+# How many recent days of activity to retain for the dashboard timeline.
+# Stored as per-day aggregates (not per-run), so heavy advanced-scheduling days
+# — which fire one session per query — can't evict older days.
+_DAILY_KEEP = 90
 
 # JS executed on rewards.bing.com (or a Bing SERP) to read the user's current
 # available-points balance. Tries a series of known selectors and returns an
@@ -138,7 +140,7 @@ def scrape_points_balance(driver, logger=None):
     if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
         balance = int(value)
         if logger:
-            logger(f"Points balance scraped: {balance:,} (via {info.get('via')})")
+            logger(f"Points balance scraped: {balance:,}")
         return balance
 
     if logger:
@@ -200,9 +202,43 @@ class StatsManager:
                 "points_estimate": 0,
                 "points_delta": None,
             },
-            # Rolling window of recent runs for the dashboard timeline.
-            "runs": [],
+            # Per-day activity aggregates for the dashboard timeline, keyed by
+            # "YYYY-MM-DD" → {pc, mobile, cards, runs}. Capped to _DAILY_KEEP
+            # days. Per-day (not per-run) so a busy day can't evict old days.
+            "daily": {},
         }
+
+    @staticmethod
+    def _trim_daily(daily):
+        """Keep only the most recent _DAILY_KEEP days (by sorted date key)."""
+        if not isinstance(daily, dict):
+            return {}
+        keys = sorted(daily.keys())
+        for k in keys[:-_DAILY_KEEP]:
+            daily.pop(k, None)
+        return daily
+
+    @staticmethod
+    def _daily_from_runs(runs):
+        """
+        Build per-day aggregates from the legacy per-run `runs` list, so an
+        existing stats.json keeps whatever history its rolling window still has.
+        """
+        daily = {}
+        for r in runs:
+            if not isinstance(r, dict):
+                continue
+            day = str(r.get("ts", ""))[:10]
+            if len(day) != 10:
+                continue
+            bucket = daily.setdefault(
+                day, {"pc": 0, "mobile": 0, "cards": 0, "runs": 0}
+            )
+            bucket["pc"] += int(r.get("pc", 0) or 0)
+            bucket["mobile"] += int(r.get("mobile", 0) or 0)
+            bucket["cards"] += int(r.get("cards", 0) or 0)
+            bucket["runs"] += 1
+        return daily
 
     def _merge_defaults(self, data):
         """Overlay stored data onto the default shape so missing keys can't KeyError."""
@@ -213,9 +249,14 @@ class StatsManager:
             stored = data.get(section)
             if isinstance(stored, dict):
                 merged[section].update(stored)
-        runs = data.get("runs")
-        if isinstance(runs, list):
-            merged["runs"] = runs[-_MAX_RUN_RECORDS:]
+
+        # Prefer the new per-day aggregates; otherwise migrate from any legacy
+        # per-run `runs` list left in an older stats.json.
+        daily = data.get("daily")
+        if isinstance(daily, dict):
+            merged["daily"] = self._trim_daily(dict(daily))
+        elif isinstance(data.get("runs"), list):
+            merged["daily"] = self._trim_daily(self._daily_from_runs(data["runs"]))
         return merged
 
     def get_stats(self):
@@ -281,7 +322,7 @@ class StatsManager:
         """
         Record one completed run: bump lifetime counters, refresh the
         last-session snapshot, fold in a freshly-scraped balance (if any), and
-        append a run record to the rolling timeline.
+        add this run's activity to today's per-day aggregate.
 
         Args:
             pc_searches (int): successful PC searches this run.
@@ -337,18 +378,16 @@ class StatsManager:
             "points_delta": points_delta,
         }
 
-        stats["runs"].append(
-            {
-                "ts": now_iso,
-                "pc": pc,
-                "mobile": mobile,
-                "cards": cards,
-                "points_estimate": session_estimate,
-                "balance": balance,
-                "delta": points_delta,
-            }
+        # Fold this run into today's per-day aggregate.
+        today = now_iso[:10]
+        bucket = stats["daily"].setdefault(
+            today, {"pc": 0, "mobile": 0, "cards": 0, "runs": 0}
         )
-        stats["runs"] = stats["runs"][-_MAX_RUN_RECORDS:]
+        bucket["pc"] += pc
+        bucket["mobile"] += mobile
+        bucket["cards"] += cards
+        bucket["runs"] += 1
+        stats["daily"] = self._trim_daily(stats["daily"])
 
         self.save_stats(stats)
         return stats

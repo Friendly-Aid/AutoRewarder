@@ -83,7 +83,8 @@
       <div class="dash-section-head">
         <div class="dash-section-title">Recent activity (estimated points / day)</div>
         <div class="chart-legend">
-          <span class="legend-item"><span class="legend-dot legend-search"></span>Searches</span>
+          <span class="legend-item"><span class="legend-dot legend-pc"></span>PC</span>
+          <span class="legend-item"><span class="legend-dot legend-mobile"></span>Mobile</span>
           <span class="legend-item"><span class="legend-dot legend-daily"></span>Daily</span>
         </div>
       </div>
@@ -198,7 +199,7 @@
       document.getElementById('m_cards').textContent = fmt(life.daily_cards || 0);
       document.getElementById('m_runs').textContent = fmt(life.runs || 0);
 
-      render_runs_chart(stats.runs || [], stats.constants);
+      render_runs_chart(stats.daily || {}, stats.constants);
     }
 
     function day_label(isoDate) {
@@ -207,10 +208,33 @@
       return m ? `${m[3]}/${m[2]}` : isoDate;
     }
 
-    // One stacked bar per day: searches (pc+mobile × per-search) and daily
-    // (cards × per-card), each its own colour. Uses the estimate breakdown
-    // because the real balance delta can't be attributed to a type.
-    function render_runs_chart(runs, consts) {
+    // Column geometry — must match .bar-col width + .runs-chart gap/padding
+    // in dashboard.css.
+    const COL_W = 30;
+    const COL_GAP = 8;
+    const CHART_PAD = 12;
+
+    // Cached so a window resize can re-render with the new day capacity.
+    let _chartData = { daily: {}, consts: null };
+
+    // How many day-columns fit in the chart's current inner width. Returns a
+    // sane default until the element has a real laid-out width (the webview
+    // can report 0/tiny on the very first paint); the ResizeObserver set up in
+    // pywebviewready re-renders once the true width is known.
+    function chart_capacity() {
+      const chart = document.getElementById('runs_chart');
+      const avail = (chart ? chart.clientWidth : 0) - CHART_PAD * 2;
+      if (avail < COL_W) return 16;  // not laid out yet → sane default
+      return Math.max(1, Math.floor((avail + COL_GAP) / (COL_W + COL_GAP)));
+    }
+
+    // One stacked bar per day with three segments: PC searches, mobile
+    // searches (both × per-search) and daily (cards × per-card), each its own
+    // colour. Uses the estimate breakdown because the real balance delta can't
+    // be attributed to a type. Columns are fixed-width and packed from the
+    // left; only the most recent days that fit are kept (oldest drop off left).
+    function render_runs_chart(dailyData, consts) {
+      _chartData = { daily: dailyData || {}, consts: consts || null };
       const chart = document.getElementById('runs_chart');
       const empty = document.getElementById('runs_empty');
       while (chart.firstChild) chart.removeChild(chart.firstChild);
@@ -218,18 +242,20 @@
       const pps = (consts && consts.points_per_search) || 3;
       const ppc = (consts && consts.points_per_card) || 10;
 
-      // Aggregate runs by calendar day.
+      // dailyData is { "YYYY-MM-DD": {pc, mobile, cards, runs} } from backend.
       const byDay = new Map();
-      for (const r of (runs || [])) {
-        const key = String(r.ts || '').slice(0, 10);  // YYYY-MM-DD
+      for (const key of Object.keys(dailyData || {})) {
         if (key.length !== 10) continue;
-        const e = byDay.get(key) || { search: 0, daily: 0 };
-        e.search += ((r.pc || 0) + (r.mobile || 0)) * pps;
-        e.daily += (r.cards || 0) * ppc;
-        byDay.set(key, e);
+        const v = dailyData[key] || {};
+        byDay.set(key, {
+          pc: (v.pc || 0) * pps,
+          mobile: (v.mobile || 0) * pps,
+          daily: (v.cards || 0) * ppc,
+        });
       }
 
-      const days = Array.from(byDay.keys()).sort().slice(-14);
+      // Keep only the most recent days that fit the current width.
+      const days = Array.from(byDay.keys()).sort().slice(-chart_capacity());
       if (days.length === 0) {
         chart.hidden = true;
         empty.hidden = false;
@@ -238,13 +264,23 @@
       chart.hidden = false;
       empty.hidden = true;
 
-      const totals = days.map(d => byDay.get(d).search + byDay.get(d).daily);
+      const totals = days.map(d => {
+        const e = byDay.get(d);
+        return e.pc + e.mobile + e.daily;
+      });
       const max = Math.max(1, ...totals);
       const MAX_PX = 128;  // pixel height of the tallest day's bar
 
+      // bottom → top order (column-reverse appends first child at the bottom).
+      const SEGMENTS = [
+        { key: 'daily', cls: 'bar-daily', label: 'Daily' },
+        { key: 'mobile', cls: 'bar-mobile', label: 'Mobile' },
+        { key: 'pc', cls: 'bar-pc', label: 'PC' },
+      ];
+
       days.forEach(d => {
         const e = byDay.get(d);
-        const total = e.search + e.daily;
+        const total = e.pc + e.mobile + e.daily;
 
         const col = document.createElement('div');
         col.className = 'bar-col';
@@ -255,20 +291,16 @@
 
         const stack = document.createElement('div');
         stack.className = 'bar-stack';
-        stack.title = `${day_label(d)}\nSearches: ${fmt(e.search)} pts` +
-          `\nDaily: ${fmt(e.daily)} pts\nTotal: ${fmt(total)} pts`;
+        stack.title = `${day_label(d)}\nPC: ${fmt(e.pc)} pts` +
+          `\nMobile: ${fmt(e.mobile)} pts\nDaily: ${fmt(e.daily)} pts` +
+          `\nTotal: ${fmt(total)} pts`;
 
-        // column-reverse → first child sits at the bottom (daily as the base).
-        const daily = document.createElement('div');
-        daily.className = 'bar-seg bar-daily';
-        daily.style.height = (e.daily / max * MAX_PX) + 'px';
-
-        const search = document.createElement('div');
-        search.className = 'bar-seg bar-search';
-        search.style.height = (e.search / max * MAX_PX) + 'px';
-
-        stack.appendChild(daily);
-        stack.appendChild(search);
+        for (const seg of SEGMENTS) {
+          const div = document.createElement('div');
+          div.className = 'bar-seg ' + seg.cls;
+          div.style.height = (e[seg.key] / max * MAX_PX) + 'px';
+          stack.appendChild(div);
+        }
 
         const dayLbl = document.createElement('span');
         dayLbl.className = 'bar-day';
@@ -412,6 +444,20 @@
         // (e.g. racing the launch-time capture) doesn't pop the red diagnostic.
         if (stats && stats.derived && stats.derived.is_estimate) {
           do_refresh_balance(false);
+        }
+
+        // Re-render the chart whenever its true width is known/changes. This
+        // fires once right after layout (correcting any 0/tiny first-paint
+        // measurement) and on every window resize, so the visible day count
+        // always tracks the actual width. Chart width comes from the parent,
+        // not its bars, so re-rendering can't feed back into a resize loop.
+        if (typeof ResizeObserver !== 'undefined') {
+          const chartEl = document.getElementById('runs_chart');
+          if (chartEl) {
+            new ResizeObserver(function () {
+              render_runs_chart(_chartData.daily, _chartData.consts);
+            }).observe(chartEl);
+          }
         }
       });
     });

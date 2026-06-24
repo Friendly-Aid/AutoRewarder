@@ -1667,7 +1667,7 @@ class AutoRewarderAPI:
             self._last_balance_debug = info
             value = info.get("value")
             if isinstance(value, int) and value >= 0:
-                self.log(f"Points balance scraped: {value:,} (via {info.get('via')})")
+                self.log(f"Points balance scraped: {value:,}")
                 return value
             time.sleep(1.5)
 
