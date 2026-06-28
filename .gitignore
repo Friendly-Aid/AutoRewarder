@@ -12,3 +12,11 @@ build/
 # Virtual environments
 .venv/
 venv/
+/.idea/AutoRewarder.iml
+/.idea/misc.xml
+/.idea/inspectionProfiles/profiles_settings.xml
+/.idea/vcs.xml
+/.idea/workspace.xml
+
+# .DS_Store
+.DS_Store
