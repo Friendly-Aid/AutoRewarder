@@ -172,9 +172,9 @@ class SearchEngine:
 
                 tabs_config = [
                     {"name": "All", "priority": 70, "id": None},
-                    {"name": "Images", "priority": 7.5, "id": "b-scopeListItem-images"},
-                    {"name": "Videos", "priority": 7.5, "id": "b-scopeListItem-video"},
-                    {"name": "News", "priority": 15, "id": "b-scopeListItem-news"},
+                    {"name": "Images", "priority": 10, "id": "b-scopeListItem-images"},
+                    {"name": "Videos", "priority": 10, "id": "b-scopeListItem-video"},
+                    {"name": "News", "priority": 10, "id": "b-scopeListItem-news"},
                 ]
 
                 weights = [tab["priority"] for tab in tabs_config]
