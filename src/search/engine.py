@@ -272,4 +272,3 @@ class SearchEngine:
                     return
                 self._log(f"[ERROR] Unknown error on attempt #{i+1}: {e}")
                 self._add_to_history(query, f"[ERROR] Unknown Error: {str(e)[:50]}")
-
