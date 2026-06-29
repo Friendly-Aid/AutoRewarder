@@ -646,7 +646,7 @@ class AutoRewarderAPI:
             if os.path.exists(candidate):
                 python_exe = candidate
         entry = os.path.join(BASE_DIR, "AutoRewarder.py")
-        
+
         return f'"{python_exe}" "{entry}" --headless --account {account_id}'
 
     # ---- Per-account OS-task naming -----------------------------------
@@ -658,7 +658,7 @@ class AutoRewarderAPI:
     def _systemd_unit_base(self, account_id):
         """Base name for the systemd service + timer of a specific account."""
         return f"{_SYSTEMD_UNIT_NAME}-{account_id}"
-    
+
     def _macos_launchagent_base(self, account_id):
         """Base name for the systemd service + timer of a specific account."""
         return f"{_MACOS_LAUNCHAGENT_NAME}.{account_id}"
@@ -671,10 +671,10 @@ class AutoRewarderAPI:
 
     def _systemd_user_dir(self):
         return os.path.join(os.path.expanduser("~"), ".config", "systemd", "user")
-    
+
     def _launchagent_user_dir(self):
         return os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents")
-    
+
     def _legacy_linux_autostart_path(self):
         """Old .desktop autostart path — kept only for migration cleanup."""
         return os.path.join(
@@ -1043,14 +1043,15 @@ class AutoRewarderAPI:
             return True
         except Exception:
             return False
-    
+
     def _register_macos_launchagent(self, account_id, run_time, label=None):
         """Write + enable a per-account launchagent .service + .timer."""
-        
+
         import plistlib
+
         try:
             try:
-                hour, minute = map(int, run_time.split(':'))
+                hour, minute = map(int, run_time.split(":"))
             except (ValueError, AttributeError):
                 self.log(f"[ERROR] Invalid run_time format: {run_time}")
                 return False
@@ -1061,26 +1062,21 @@ class AutoRewarderAPI:
 
             os.makedirs(base, exist_ok=True)
             cmd = self._autostart_command(account_id)
-            program_args=shlex.split(cmd)
+            program_args = shlex.split(cmd)
             desc_label = label or account_id
-            
+
             plist_content = {
                 "Label": unit_base,
                 "ProgramArguments": program_args,
-                "StartCalendarInterval": {
-                    "Hour": hour,
-                    "Minute": minute
-                },
-                "RunAtLoad": False
+                "StartCalendarInterval": {"Hour": hour, "Minute": minute},
+                "RunAtLoad": False,
             }
-            
+
             with open(plist_path, "wb") as fh:
                 plistlib.dump(plist_content, fh)
-                
+
             try:
-                subprocess.run(
-                    ["launchctl", "unload", plist_path], capture_output=True
-                )
+                subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
             except Exception:
                 pass
 
@@ -1093,14 +1089,14 @@ class AutoRewarderAPI:
                     f"{(result.stderr or result.stdout).strip()}"
                 )
                 return False
-            
+
             self.log(f"Scheduled LaunchAgent registered: '{desc_label}' at {run_time}")
             return True
-        
+
         except FileNotFoundError:
             self.log("[ERROR] launchctl not found — launchctl unavailable.")
             return False
-        
+
         except Exception as e:
             self.log(f"[ERROR] Failed to register LaunchAgent: {e}")
             return False
@@ -1111,21 +1107,18 @@ class AutoRewarderAPI:
             base = self._launchagent_user_dir()
             unit_base = self._macos_launchagent_base(account_id)
             plist_path = os.path.join(base, f"{unit_base}.plist")
-            
+
             try:
-                subprocess.run(
-                    ["launchctl", "unload", plist_path],
-                    capture_output=True
-                )
+                subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
             except Exception:
                 pass
-            
+
             if os.path.exists(plist_path):
                 try:
                     os.remove(plist_path)
                 except OSError:
                     pass
-                
+
             return True
         except Exception:
             return False

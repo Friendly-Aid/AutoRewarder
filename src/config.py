@@ -34,7 +34,7 @@ elif PLATFORM_NAME == "Darwin":
     APP_DIR = os.path.join(
         os.path.expanduser("~"), "Library", "Application Support", "AutoRewarder"
     )
-    
+
 # Quit on invalid platform
 else:
     raise OSError(f"Unsupported platform: {PLATFORM_NAME}")
