@@ -1369,7 +1369,19 @@ class AutoRewarderAPI:
         if current:
             self.log(f"Switched to account '{current['label']}'.")
         self._broadcast_account_ui()
+
+        # Refresh the new account's real balance in the background so the card
+        # shows an up-to-date total, not just the last stored one.
+        if self.account_meta is not None and self.account_meta.is_first_setup_done():
+            threading.Thread(target=self._refresh_balance_async, daemon=True).start()
         return True
+
+    def _refresh_balance_async(self):
+        """Background wrapper around refresh_balance(); result is ignored."""
+        try:
+            self.refresh_balance()
+        except Exception as e:
+            self.log(f"[WARNING] Background balance refresh failed: {e}")
 
     def rename_account(self, account_id, new_label):
         """
@@ -1726,7 +1738,8 @@ class AutoRewarderAPI:
             self._last_balance_debug = info
             value = info.get("value")
             if isinstance(value, int) and value >= 0:
-                self.log(f"Points balance scraped: {value:,}")
+                # No log here — the caller emits a single user-facing line, so
+                # a scrape+update pair doesn't read as a duplicate.
                 return value
             time.sleep(1.5)
 
@@ -1777,6 +1790,7 @@ class AutoRewarderAPI:
             return
         stats.update_balance(balance)
         self._notify_stats_refresh()
+        self.log(f"Points balance updated: {balance:,}")
 
     def refresh_balance(self):
         """

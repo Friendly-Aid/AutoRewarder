@@ -8,6 +8,9 @@ let currentAccountId = null;
 // is running at launch. Start must stay disabled until it finishes, so a run
 // can't open a second driver on the same Edge profile.
 let driverWarmingUp = false;
+// True while a balance scrape holds a driver (launch refresh, manual refresh,
+// or account-switch refresh). Start must stay disabled during it too.
+let balanceFetching = false;
 
 // =========================================================================
 // Toasts
@@ -325,7 +328,7 @@ function enable_start_button() {
   const label = btn.querySelector('.btn-label');
   if (label) label.textContent = 'Start run';
   const current = accountsCache.find(a => a.id === currentAccountId);
-  btn.disabled = !(current && current.first_setup_done) || driverWarmingUp;
+  btn.disabled = !(current && current.first_setup_done) || driverWarmingUp || balanceFetching;
 
   // Stop button is meaningful only while a run is in progress.
   const stopBtn = document.getElementById('stop_btn');
@@ -410,8 +413,24 @@ function _fmt_points(value, isEstimate) {
  * while it scrapes the real balance (at launch, or on a manual refresh).
  */
 function set_stats_loading(on) {
+  balanceFetching = Boolean(on);
   const card = document.getElementById('stats_card');
-  if (card) card.classList.toggle('stats-loading', Boolean(on));
+  if (card) card.classList.toggle('stats-loading', balanceFetching);
+
+  // A balance scrape holds a driver on the profile → block Start meanwhile.
+  const btn = document.getElementById('start_btn');
+  if (!btn) return;
+  const label = btn.querySelector('.btn-label');
+  const txt = label ? label.textContent : '';
+  if (txt === 'Running…') return;  // a run owns the button; leave it alone
+  if (balanceFetching) {
+    btn.disabled = true;
+    if (label) label.textContent = 'Loading…';
+  } else {
+    const current = accountsCache.find(a => a.id === currentAccountId);
+    btn.disabled = !(current && current.first_setup_done) || driverWarmingUp;
+    if (label && !driverWarmingUp) label.textContent = 'Start run';
+  }
 }
 
 /**
@@ -1041,11 +1060,12 @@ function refresh_account_ui() {
     // Start button.
     const startBtn = document.getElementById('start_btn');
     const current = accountsCache.find(a => a.id === currentAccountId);
-    const shouldEnable = Boolean(current && current.first_setup_done) && !driverWarmingUp;
+    const busy = driverWarmingUp || balanceFetching;
+    const shouldEnable = Boolean(current && current.first_setup_done) && !busy;
     const label = startBtn.querySelector('.btn-label');
     if (!label || label.textContent === 'Start run' || label.textContent === 'Loading…') {
       startBtn.disabled = !shouldEnable;
-      if (label) label.textContent = driverWarmingUp ? 'Loading…' : 'Start run';
+      if (label) label.textContent = busy ? 'Loading…' : 'Start run';
     }
 
     update_status_indicator();
