@@ -754,6 +754,8 @@ input[type="number"]:focus {
   font-family: "JetBrains Mono", "SF Mono", "Consolas", "Courier New", monospace;
   color: var(--text-muted);
   line-height: 1.6;
+  /* Let users select/copy log lines (body sets user-select: none globally). */
+  user-select: text;
 }
 
 .log-line {
