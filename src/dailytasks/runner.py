@@ -40,6 +40,21 @@ SECTIONS = (
 # loaded properly.
 ANY_CARD_SELECTOR = ", ".join(sel for _, sel in SECTIONS)
 
+# Both the legacy and the new (Next.js) dashboards live at this URL; a migrated
+# account is redirected to the new /dashboard automatically.
+DASHBOARD_URL = "https://rewards.bing.com"
+
+# JS booleans used to tell which dashboard actually rendered (for variant="auto").
+# The legacy dashboard exposes `mee-rewards-*` Angular custom elements; the new
+# one is a Next.js app that streams its data into `window.__next_f` and renders
+# a `#dailyset` section.
+_IS_LEGACY_JS = (
+    "return !!(document.querySelector('mee-rewards-daily-set-item-content')"
+    " || document.querySelector('mee-rewards-more-activities-card-item')"
+    " || document.querySelector('mee-rewards-more-activities-card'));"
+)
+_IS_NEW_JS = "return !!(window.__next_f || document.getElementById('dailyset'));"
+
 
 class DailySet:
     """
@@ -47,14 +62,20 @@ class DailySet:
     scoped to one account.
     """
 
-    def __init__(self, status_file, logger=None):
+    def __init__(self, status_file, logger=None, dashboard_variant="auto"):
         """
         Args:
             status_file (str): Absolute path to this account's status.json.
             logger (callable, optional): A function to log messages. Defaults to None.
+            dashboard_variant (str): Which Rewards dashboard this account uses —
+                "auto" (detect at runtime), "legacy" (mee-rewards-* DOM), or
+                "new" (Next.js dashboard). Acts as the default; the value passed
+                to `perform_daily_set` takes precedence so runtime changes to the
+                per-account setting are honored.
         """
         self.status_file = status_file
         self.logger = logger
+        self.dashboard_variant = dashboard_variant
         # Filled in on each `perform_daily_set` call after the driver is ready.
         self.cards = None
         # Aggregated card counts from the most recent perform_daily_set call,
@@ -315,19 +336,81 @@ class DailySet:
 
     # -- Top-level entry point -------------------------------------------------
 
-    def perform_daily_set(self, driver, human, stop_event=None):
+    def perform_daily_set(self, driver, human, stop_event=None, variant=None):
         """
-        Visit the Rewards dashboard and process every click-through task we
-        know about: the Daily Set and the "More Activities" / "Plus d'activité"
-        section. Cards already marked complete are skipped, and each clicked
-        card's status is re-checked after the run to validate progress.
+        Run the Daily Set for this account, dispatching to the legacy or the
+        new-dashboard handler based on the resolved dashboard variant.
 
         Args:
             driver: Selenium WebDriver instance.
             human: An instance of HumanBehavior for performing human-like interactions.
-            stop_event (threading.Event, optional): When set, the per-section
-                card loop breaks at the next iteration so the run aborts
-                cleanly without re-clicking remaining cards.
+            stop_event (threading.Event, optional): When set, the run aborts cleanly.
+            variant (str, optional): Overrides the instance's dashboard_variant
+                ("auto"/"legacy"/"new"). When None, falls back to the value set
+                on the instance. "auto" detects which dashboard rendered.
+
+        Returns:
+            bool: True if it's reasonable to mark today as done, False if we
+                  made no progress (so the next run can retry).
+        """
+        variant = variant or self.dashboard_variant or "auto"
+
+        if variant == "auto":
+            variant = self._detect_variant(driver)
+            self._log(f"Auto-detected Rewards dashboard: {variant}")
+
+        if variant == "new":
+            from .new_dashboard import NewDashboardDailySet
+
+            return NewDashboardDailySet(logger=self.logger).perform(
+                driver, human, stop_event=stop_event
+            )
+
+        return self._perform_legacy(driver, human, stop_event=stop_event)
+
+    def _detect_variant(self, driver):
+        """
+        Load the dashboard and report which variant rendered: "legacy" or "new".
+
+        Navigates to DASHBOARD_URL, waits until either dashboard's signature is
+        present, and returns "legacy" for the mee-rewards-* DOM or "new" for the
+        Next.js app. Falls back to "legacy" if neither is detected (the legacy
+        path fails loudly, which is the safer default for an unknown page).
+        """
+        try:
+            driver.get(DASHBOARD_URL)
+        except Exception as e:
+            self._log(f"[WARNING] Could not open the dashboard for detection: {e}")
+            return "legacy"
+
+        def _ready(d):
+            try:
+                return bool(d.execute_script(_IS_LEGACY_JS)) or bool(
+                    d.execute_script(_IS_NEW_JS)
+                )
+            except Exception:
+                return False
+
+        try:
+            WebDriverWait(driver, 15).until(_ready)
+        except TimeoutException:
+            pass
+
+        try:
+            if driver.execute_script(_IS_LEGACY_JS):
+                return "legacy"
+            if driver.execute_script(_IS_NEW_JS):
+                return "new"
+        except Exception:
+            pass
+        return "legacy"
+
+    def _perform_legacy(self, driver, human, stop_event=None):
+        """
+        Visit the legacy Rewards dashboard and process every click-through task
+        we know about: the Daily Set and the "More Activities" / "Plus
+        d'activité" section. Cards already marked complete are skipped, and each
+        clicked card's status is re-checked after the run to validate progress.
 
         Returns:
             bool: True if it's reasonable to mark today as done — either all
@@ -350,7 +433,7 @@ class DailySet:
         }
 
         try:
-            driver.get("https://rewards.bing.com")
+            driver.get(DASHBOARD_URL)
 
             # Wait for at least one card from any tracked section to render.
             try:

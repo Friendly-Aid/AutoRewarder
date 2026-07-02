@@ -153,7 +153,11 @@ class AutoRewarderAPI:
             profile = edge_profile_path(current_id)
             self.account_meta = AccountMetaManager(current_id)
             self.history = HistoryManager(history_path(current_id), logger=self.log)
-            self.daily_set = DailySet(status_path(current_id), logger=self.log)
+            self.daily_set = DailySet(
+                status_path(current_id),
+                logger=self.log,
+                dashboard_variant=self.account_meta.get_dashboard_variant(),
+            )
             self.stats = StatsManager(stats_path(current_id), logger=self.log)
             self.driver_manager = DriverManager(
                 profile_path=profile, hide_browser=self.hide_browser
@@ -520,18 +524,48 @@ class AutoRewarderAPI:
         return AccountMetaManager(account_id).get_schedule()
 
     def get_all_schedules(self):
-        """Return [{id, label, first_setup_done, schedule}] for the settings modal."""
+        """Return [{id, label, first_setup_done, schedule, dashboard_variant}] for the settings modal."""
         result = []
         for acc in self.account_manager.list():
+            meta = AccountMetaManager(acc["id"])
             result.append(
                 {
                     "id": acc["id"],
                     "label": acc["label"],
                     "first_setup_done": acc["first_setup_done"],
-                    "schedule": AccountMetaManager(acc["id"]).get_schedule(),
+                    "schedule": meta.get_schedule(),
+                    "dashboard_variant": meta.get_dashboard_variant(),
                 }
             )
         return result
+
+    def get_dashboard_variant(self, account_id):
+        """Return a specific account's Rewards dashboard variant, or None if unknown."""
+        if not account_id or not self.account_manager.exists(account_id):
+            return None
+        return AccountMetaManager(account_id).get_dashboard_variant()
+
+    def set_dashboard_variant(self, account_id, variant):
+        """
+        Persist a specific account's Rewards dashboard variant.
+
+        Args:
+            account_id (str): The account to update.
+            variant (str): One of "auto", "legacy", "new".
+
+        Returns:
+            bool: True if persisted, False if the account or value is invalid.
+        """
+        if not account_id or not self.account_manager.exists(account_id):
+            return False
+        ok = AccountMetaManager(account_id).set_dashboard_variant(variant)
+        if not ok:
+            return False
+        # Keep the live DailySet in sync if we changed the current account, so a
+        # run started right after the toggle uses the new variant.
+        if account_id == self.account_manager.current_id() and self.daily_set:
+            self.daily_set.dashboard_variant = variant
+        return True
 
     def set_schedule(self, account_id, payload):
         """

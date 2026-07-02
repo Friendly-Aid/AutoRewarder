@@ -814,6 +814,17 @@ function build_schedule_card(item) {
   const body = document.createElement('div');
   body.className = 'schedule-card-body';
 
+  // Dashboard variant row (applies to any run, not just scheduled ones):
+  // which Microsoft Rewards dashboard this account uses for the Daily Set.
+  const DASHBOARD_VARIANTS = ['auto', 'legacy', 'new'];
+  const dashDefault = DASHBOARD_VARIANTS.includes(item.dashboard_variant)
+    ? item.dashboard_variant : 'auto';
+  body.appendChild(make_select_field('Rewards dashboard', 'schedule-dashboard', dashDefault, [
+    { value: 'auto', label: 'Auto (detect)' },
+    { value: 'legacy', label: 'Legacy' },
+    { value: 'new', label: 'New' },
+  ]));
+
   // Advanced scheduling sub-toggle row.
   const advRow = document.createElement('label');
   advRow.className = 'sched-adv-row';
@@ -915,6 +926,28 @@ function build_schedule_card(item) {
   return card;
 }
 
+function make_select_field(labelText, className, value, options) {
+  const wrap = document.createElement('div');
+  wrap.className = 'form-field';
+
+  const label = document.createElement('label');
+  label.textContent = labelText;
+  wrap.appendChild(label);
+
+  const select = document.createElement('select');
+  select.className = className;
+  options.forEach(opt => {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    if (opt.value === value) o.selected = true;
+    select.appendChild(o);
+  });
+  wrap.appendChild(select);
+
+  return wrap;
+}
+
 function make_form_field(labelText, inputType, className, value, opts) {
   const wrap = document.createElement('div');
   wrap.className = 'form-field';
@@ -952,6 +985,9 @@ async function save_settings() {
     const runDuration = parseInt(card.querySelector('.schedule-run-duration').value, 10);
     const queriesPerHour = parseInt(card.querySelector('.schedule-queries-per-hour').value, 10);
     const runTime = card.querySelector('.schedule-run-time').value;
+    const dashEl = card.querySelector('.schedule-dashboard');
+    const dashboardVariant = dashEl && ['auto', 'legacy', 'new'].includes(dashEl.value)
+      ? dashEl.value : 'auto';
 
     if (enabled) {
       if (isNaN(pc) || pc < 0 || pc > 130) {
@@ -984,6 +1020,7 @@ async function save_settings() {
 
     payloads.push({
       id: id,
+      dashboardVariant: dashboardVariant,
       payload: {
         enabled: enabled,
         advancedScheduling: advancedScheduling,
@@ -997,6 +1034,12 @@ async function save_settings() {
   }
 
   try {
+    // Persist each account's dashboard choice first (independent of the
+    // schedule payload; kept out of the results[] slicing below).
+    await Promise.all(payloads.map(p =>
+      pywebview.api.set_dashboard_variant(p.id, p.dashboardVariant)
+    ));
+
     const scheduleCalls = payloads.map(p =>
       pywebview.api.set_schedule(p.id, p.payload)
     );
