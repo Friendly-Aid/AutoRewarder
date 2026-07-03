@@ -18,6 +18,7 @@ import random
 import time
 
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 DASHBOARD_URL = "https://rewards.bing.com/dashboard"
@@ -202,6 +203,132 @@ class NewDashboardDailySet:
         except Exception as e:
             return {"error": str(e)[:120]}
 
+    # -- Clicking activities ---------------------------------------------------
+
+    def _expand_section(self, driver):
+        """
+        Expand the collapsed "Ensemble du jour" section so its cards become
+        visible and clickable. react-aria marks the Disclosure toggle with
+        slot="trigger"; clicking it when aria-expanded="false" opens the panel.
+        """
+        try:
+            triggers = driver.find_elements(
+                By.CSS_SELECTOR, "#dailyset button[slot='trigger']"
+            )
+        except Exception:
+            return
+        for btn in triggers:
+            try:
+                if (btn.get_attribute("aria-expanded") or "").lower() == "false":
+                    driver.execute_script("arguments[0].click();", btn)
+                    time.sleep(random.uniform(0.6, 1.2))
+            except Exception:
+                continue
+
+    def _locate_anchor(self, driver, destination, index):
+        """Find the daily-set card <a> for `destination`, else the index-th card."""
+        try:
+            anchors = driver.find_elements(
+                By.CSS_SELECTOR, "#dailyset a[href*='bing.com/search']"
+            )
+        except Exception:
+            return None
+        for a in anchors:
+            try:
+                if (a.get_attribute("href") or "") == destination:
+                    return a
+            except Exception:
+                continue
+        if 0 <= index < len(anchors):
+            return anchors[index]
+        return None
+
+    def _click_anchor(self, driver, human, anchor, main_tab, stop_event):
+        """
+        Click a daily-set card the way a user does (a real pointer click that
+        opens the card's new tab from the dashboard) — this is what credits the
+        offer; a bare navigation to the destination URL does not. Handles the new
+        tab (dwell + close) or a same-tab navigation, then returns to the
+        dashboard. Returns True if the click was dispatched and handled.
+        """
+        try:
+            # Skip a card that's momentarily 0x0 (SPA re-render / still collapsed).
+            try:
+                w, h = driver.execute_script(
+                    "const r=arguments[0].getBoundingClientRect();"
+                    "return [r.width, r.height];",
+                    anchor,
+                )
+                if float(w) <= 6 or float(h) <= 6:
+                    return False
+            except Exception:
+                pass
+
+            try:
+                driver.execute_script(
+                    "arguments[0].scrollIntoView({block:'center', inline:'nearest'});",
+                    anchor,
+                )
+                time.sleep(random.uniform(0.4, 0.8))
+            except Exception:
+                pass
+
+            before = set(driver.window_handles)
+            cur_url = driver.current_url
+            human.click_element(anchor, scroll_into_view=False)
+            time.sleep(random.uniform(2, 4))
+
+            new_tabs = [
+                x for x in driver.window_handles if x != main_tab and x not in before
+            ]
+            if new_tabs:
+                for tab in new_tabs:
+                    driver.switch_to.window(tab)
+                    # Dwell so the rewards credit beacon on the search page fires.
+                    time.sleep(random.uniform(3, 6))
+                    try:
+                        human.scroll_page()
+                    except Exception:
+                        pass
+                    time.sleep(random.uniform(1, 2))
+                    driver.close()
+                driver.switch_to.window(main_tab)
+                time.sleep(random.uniform(1, 2))
+                return True
+
+            if driver.current_url != cur_url:
+                # Opened in the same tab: dwell, then return to the dashboard.
+                time.sleep(random.uniform(3, 6))
+                try:
+                    human.scroll_page()
+                except Exception:
+                    pass
+                driver.get(DASHBOARD_URL)
+                self._wait_ready(driver)
+                time.sleep(random.uniform(1.5, 2.5))
+                self._expand_section(driver)
+                return True
+
+            # Nothing happened — click missed.
+            return False
+
+        except Exception as e:
+            if stop_event is not None and stop_event.is_set():
+                return False
+            self._log(f"[WARNING] Card click failed: {str(e).splitlines()[0][:140]}")
+            try:
+                for tab in list(driver.window_handles):
+                    if tab != main_tab:
+                        driver.switch_to.window(tab)
+                        driver.close()
+            except Exception:
+                pass
+            try:
+                driver.switch_to.window(main_tab)
+            except Exception:
+                pass
+            return False
+
     @staticmethod
     def _date_key(item):
         """Parse an item's MM/DD/YYYY date into a comparable (Y, M, D) tuple."""
@@ -323,11 +450,20 @@ class NewDashboardDailySet:
             if not incomplete:
                 return True
 
+            # Clicking the card (which opens its search in a new tab from the
+            # dashboard) is what credits the offer — a bare driver.get() to the
+            # destination does not. Expand the section, then click each incomplete
+            # card like a user would.
+            main_tab = driver.current_window_handle
+            self._expand_section(driver)
+
             attempted = 0
-            for item in incomplete:
+            for idx, item in enumerate(todays):
                 if stop_event is not None and stop_event.is_set():
                     self._log("Stop requested — halting new-dashboard daily set.")
                     break
+                if item.get("isCompleted"):
+                    continue
 
                 destination = item.get("destination")
                 title = item.get("title") or item.get("offerId") or "activity"
@@ -338,16 +474,29 @@ class NewDashboardDailySet:
                     continue
 
                 self._log(f"Opening daily-set activity: {title}")
+                anchor = self._locate_anchor(driver, destination, idx)
+                if anchor is not None and self._click_anchor(
+                    driver, human, anchor, main_tab, stop_event
+                ):
+                    attempted += 1
+                    continue
+
+                # Last resort if the card can't be located/clicked: navigate
+                # directly (often won't credit, but better than skipping).
+                self._log(f"[INFO] Falling back to direct navigation for '{title}'.")
                 try:
                     driver.get(destination)
                     attempted += 1
-                    # Dwell like a human reading the results page.
                     time.sleep(random.uniform(2, 4))
                     try:
                         human.scroll_page()
                     except Exception:
                         pass
-                    time.sleep(random.uniform(2, 5))
+                    time.sleep(random.uniform(2, 4))
+                    driver.get(DASHBOARD_URL)
+                    self._wait_ready(driver)
+                    time.sleep(random.uniform(1, 2))
+                    self._expand_section(driver)
                 except Exception as e:
                     if stop_event is not None and stop_event.is_set():
                         break
