@@ -312,8 +312,16 @@ class NewDashboardDailySet:
             except Exception:
                 continue
 
-    def _locate_anchor(self, driver, destination, index, section_id="dailyset"):
-        """Find the card <a> for `destination` in a section, else the index-th."""
+    def _locate_anchor(self, driver, destination, section_id="dailyset"):
+        """
+        Find the card <a> matching `destination` in a section by its exact href.
+
+        Returns None when there's no exact match: the activity list is filtered
+        (completed cards, quests and badge-less promos are dropped), so a
+        positional fallback would index the raw anchors out of step with that
+        list and could click the wrong card. Callers fall back to direct
+        navigation instead.
+        """
         try:
             anchors = driver.find_elements(By.CSS_SELECTOR, f"#{section_id} a[href]")
         except Exception:
@@ -324,8 +332,6 @@ class NewDashboardDailySet:
                     return a
             except Exception:
                 continue
-        if 0 <= index < len(anchors):
-            return anchors[index]
         return None
 
     def _locate_quest_task(self, driver, destination):
@@ -354,13 +360,26 @@ class NewDashboardDailySet:
                 continue
         return None
 
-    def _click_anchor(self, driver, human, anchor, main_tab, stop_event):
+    def _click_anchor(
+        self,
+        driver,
+        human,
+        anchor,
+        main_tab,
+        stop_event,
+        return_url=DASHBOARD_URL,
+        section_id="dailyset",
+    ):
         """
-        Click a daily-set card the way a user does (a real pointer click that
-        opens the card's new tab from the dashboard) — this is what credits the
-        offer; a bare navigation to the destination URL does not. Handles the new
-        tab (dwell + close) or a same-tab navigation, then returns to the
-        dashboard. Returns True if the click was dispatched and handled.
+        Click a card the way a user does (a real pointer click that opens the
+        card's new tab) — this is what credits the offer; a bare navigation to
+        the destination URL does not. Handles the new tab (dwell + close) or a
+        same-tab navigation.
+
+        On a same-tab navigation, returns to `return_url` and expands
+        `section_id` so the caller's remaining anchors stay discoverable (each
+        flow — daily set, earn page — has its own page and section). Returns True
+        if the click was dispatched and handled.
         """
         try:
             # Skip a card that's momentarily 0x0 (SPA re-render / still collapsed).
@@ -408,16 +427,17 @@ class NewDashboardDailySet:
                 return True
 
             if driver.current_url != cur_url:
-                # Opened in the same tab: dwell, then return to the dashboard.
+                # Opened in the same tab: dwell, then return to the caller's
+                # page/section so its remaining anchors stay discoverable.
                 time.sleep(random.uniform(3, 6))
                 try:
                     human.scroll_page()
                 except Exception:
                     pass
-                driver.get(DASHBOARD_URL)
+                driver.get(return_url)
                 self._wait_ready(driver)
                 time.sleep(random.uniform(1.5, 2.5))
-                self._expand_section(driver)
+                self._expand_section(driver, section_id)
                 return True
 
             # Nothing happened — click missed.
@@ -564,7 +584,7 @@ class NewDashboardDailySet:
         self._log(f"'earn-page': {len(items)} activity(ies) to do.")
         main_tab = driver.current_window_handle
         done = 0
-        for idx, item in enumerate(items):
+        for item in items:
             if stop_event is not None and stop_event.is_set():
                 self._log("Stop requested — halting 'earn-page'.")
                 break
@@ -573,9 +593,15 @@ class NewDashboardDailySet:
             if not isinstance(dest, str) or not dest.startswith("http"):
                 continue
             self._log(f"Opening activity: {title} (+{item.get('points')})")
-            anchor = self._locate_anchor(driver, dest, idx, section_id="moreactivities")
+            anchor = self._locate_anchor(driver, dest, section_id="moreactivities")
             if anchor is not None and self._click_anchor(
-                driver, human, anchor, main_tab, stop_event
+                driver,
+                human,
+                anchor,
+                main_tab,
+                stop_event,
+                return_url=EARN_URL,
+                section_id="moreactivities",
             ):
                 done += 1
                 continue
@@ -600,7 +626,9 @@ class NewDashboardDailySet:
                 self._log(f"[WARNING] Failed to open '{title}': {e}")
 
         if done:
-            self.last_totals["newly"] = self.last_totals.get("newly", 0) + done
+            # These opens aren't re-read/confirmed, so they count as attempts
+            # only; `newly` stays reserved for verified completions (the
+            # daily-set pass sets it from a completion re-read).
             self.last_totals["attempted"] = self.last_totals.get("attempted", 0) + done
         self._log(f"'earn-page': opened {done} activity(ies) this run.")
 
@@ -694,11 +722,11 @@ class NewDashboardDailySet:
                 self._log(f"Opening quest task: {ttitle}")
                 anchor = self._locate_quest_task(driver, dest)
                 if anchor is not None and self._click_anchor(
-                    driver, human, anchor, main_tab, stop_event
+                    driver, human, anchor, main_tab, stop_event, return_url=url
                 ):
                     opened += 1
-                    # The click returns to the dashboard or quest tab; re-open the
-                    # quest page so the next task's element can be relocated fresh.
+                    # Re-open the quest page so the next task's element can be
+                    # relocated fresh (the DOM re-renders after each click).
                     try:
                         driver.get(url)
                         self._wait_ready(driver)
@@ -707,7 +735,8 @@ class NewDashboardDailySet:
                         pass
 
         if opened:
-            self.last_totals["newly"] = self.last_totals.get("newly", 0) + opened
+            # Unverified opens count as attempts only; `newly` is reserved for
+            # verified completions.
             self.last_totals["attempted"] = (
                 self.last_totals.get("attempted", 0) + opened
             )
@@ -794,7 +823,7 @@ class NewDashboardDailySet:
             self._expand_section(driver)
 
             attempted = 0
-            for idx, item in enumerate(todays):
+            for item in todays:
                 if stop_event is not None and stop_event.is_set():
                     self._log("Stop requested — halting new-dashboard daily set.")
                     break
@@ -810,7 +839,7 @@ class NewDashboardDailySet:
                     continue
 
                 self._log(f"Opening daily-set activity: {title}")
-                anchor = self._locate_anchor(driver, destination, idx)
+                anchor = self._locate_anchor(driver, destination)
                 if anchor is not None and self._click_anchor(
                     driver, human, anchor, main_tab, stop_event
                 ):
@@ -856,14 +885,30 @@ class NewDashboardDailySet:
                 driver.get(DASHBOARD_URL)
                 self._wait_ready(driver)
                 time.sleep(random.uniform(1.5, 2.5))
-                after_items = self._read_items(driver) or self._read_items_dom(driver)
-                after = self._todays_items(after_items)
-                if after:
+                # The re-read can race a still-streaming (partial) snapshot; one
+                # missing cards would make them look completed and inflate
+                # `newly`. Only trust a snapshot that covers at least as many
+                # cards as we started with — retry (JSON then DOM) until it does.
+                after = []
+                for _ in range(5):
+                    after = self._todays_items(
+                        self._read_items(driver) or self._read_items_dom(driver)
+                    )
+                    if len(after) >= len(todays):
+                        break
+                    time.sleep(1.5)
+                if after and len(after) >= len(todays):
                     verified = True
                     still_incomplete = sum(
                         1 for it in after if not it.get("isCompleted")
                     )
                     newly = max(0, len(incomplete) - still_incomplete)
+                else:
+                    self._log(
+                        "[INFO] Post-run snapshot incomplete "
+                        f"({len(after)}/{len(todays)} cards) — not confirming "
+                        "completion this run."
+                    )
             except Exception:
                 pass
 
