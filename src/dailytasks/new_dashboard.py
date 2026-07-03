@@ -360,15 +360,25 @@ class NewDashboardDailySet:
             if stop_event is not None and stop_event.is_set():
                 return False
 
-            # Re-read the dashboard to measure how many activities are now done.
-            newly = attempted  # optimistic default if the re-read fails
+            # Re-read the dashboard to measure how many activities actually
+            # flipped to complete. window.__next_f is drained after hydration, so
+            # the re-read relies on the same JSON-then-DOM strategy as the initial
+            # read — reading JSON only here would always look "all done" (empty)
+            # and falsely report success.
+            newly = 0
+            verified = False
             try:
                 driver.get(DASHBOARD_URL)
                 self._wait_ready(driver)
                 time.sleep(random.uniform(1.5, 2.5))
-                after = self._todays_items(self._read_items(driver))
-                still_incomplete = sum(1 for it in after if not it.get("isCompleted"))
-                newly = max(0, len(incomplete) - still_incomplete)
+                after_items = self._read_items(driver) or self._read_items_dom(driver)
+                after = self._todays_items(after_items)
+                if after:
+                    verified = True
+                    still_incomplete = sum(
+                        1 for it in after if not it.get("isCompleted")
+                    )
+                    newly = max(0, len(incomplete) - still_incomplete)
             except Exception:
                 pass
 
@@ -376,14 +386,23 @@ class NewDashboardDailySet:
                 self._log(f"New dashboard daily set: +{newly} completed this run.")
                 return True
 
-            # Some activities (quizzes/polls) need manual answers and won't flip
-            # to complete just from opening them. We still opened everything, so
-            # mark today done to avoid pointless retries — mirrors the legacy path.
-            self._log(
-                "[INFO] Daily-set activities opened but none flipped to complete "
-                "(likely quizzes/polls needing manual answers). Marking today done."
-            )
-            return True
+            if verified:
+                # We could re-read the cards and they are still incomplete: the
+                # visits did not credit (common in headless — Rewards often won't
+                # credit a headless session) or the items are quizzes needing
+                # manual answers. Report honestly and don't mark today done, so a
+                # later (visible) run can retry.
+                self._log(
+                    "[WARNING] Daily-set activities were opened but none are marked "
+                    "complete on the dashboard. Not marking today done — if this is "
+                    "a headless run, try again with the browser visible."
+                )
+            else:
+                self._log(
+                    "[WARNING] Could not re-read the dashboard to confirm daily-set "
+                    "completion. Not marking today done."
+                )
+            return False
 
         except Exception as e:
             if stop_event is not None and stop_event.is_set():
