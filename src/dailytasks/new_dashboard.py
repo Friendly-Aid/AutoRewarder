@@ -22,6 +22,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 DASHBOARD_URL = "https://rewards.bing.com/dashboard"
+EARN_URL = "https://rewards.bing.com/earn"
 
 # Concatenate every streamed RSC chunk (`window.__next_f` is a list of
 # `[1, "<chunk>"]` entries) and pull out each `dailySetItems` array, returning
@@ -69,36 +70,54 @@ try {
 
 # DOM fallback: read today's daily-set activities straight from the rendered
 # `#dailyset` section when the RSC JSON isn't available. The section holds only
-# today's cards, each an <a> pointing at the Bing search that credits it. We
-# best-effort detect completion from a small set of localized "done" words; when
-# unsure we treat the card as incomplete (re-opening a completed daily search is
-# harmless).
+# today's cards, each an <a> pointing at the Bing search that credits it.
+# Completion is read from the green "success" badge (a design-system class),
+# which is language-independent.
 _DOM_DAILY_SET_JS = r"""
 try {
   var out = [];
   var root = document.getElementById('dailyset');
   if (!root) return out;
-  var doneWords = ['terminé','termine','completed','complete','done','erledigt',
-    'abgeschlossen','completado','completada','completato','concluído','voltooid',
-    'terminado','fait'];
   var links = root.querySelectorAll('a[href]');
   for (var i = 0; i < links.length; i++) {
     var a = links[i];
     var href = a.href || a.getAttribute('href') || '';
-    // Only real daily-set activities point at a Bing search. This also excludes
-    // the section header's "Gagner plus" / "Earn more" link (→ /earn), whose
-    // absolute href still contains "bing.com".
+    // Only real daily-set activities point at a Bing search (this also excludes
+    // the section header's "earn more" link, whose absolute href has bing.com).
     if (href.indexOf('bing.com/search') < 0) continue;
-    // Title only: the card's bold title node, not the whole card text (which
-    // also holds the description, points and status).
+    // Title only: the card's bold title node, not the whole card text.
     var tEl = a.querySelector('.text-globalBody2Strong') || a.querySelector('p');
     var title = tEl ? (tEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
-    var low = (a.textContent || '').toLowerCase();
-    var done = false;
-    for (var d = 0; d < doneWords.length; d++) {
-      if (low.indexOf(doneWords[d]) >= 0) { done = true; break; }
-    }
+    // Completed cards carry a green "success" badge (language-independent).
+    var done = !!a.querySelector('[class*="statusSuccess"]');
     out.push({ destination: href, title: title.slice(0, 80), isCompleted: done, date: null });
+  }
+  return out;
+} catch (e) { return []; }
+"""
+
+# The /earn "more activities" (#moreactivities) section: point-earning search
+# cards. An earnable, not-yet-done card shows a "+N" points badge; completed ones
+# show a green "success" badge instead, and promos (referral, redeem, extension)
+# have no "+N" badge — the "+N" gate keeps only the ones worth clicking.
+_MORE_ACTIVITIES_JS = r"""
+try {
+  var out = [];
+  var root = document.getElementById('moreactivities');
+  if (!root) return out;
+  var links = root.querySelectorAll('a[href]');
+  for (var i = 0; i < links.length; i++) {
+    var a = links[i];
+    var href = a.href || a.getAttribute('href') || '';
+    if (href.indexOf('bing.com') < 0) continue;
+    // Skip completed cards via their green "success" badge (language-independent).
+    if (a.querySelector('[class*="statusSuccess"]')) continue;
+    var txt = (a.textContent || '').replace(/\s+/g, ' ').trim();
+    var m = txt.match(/\+\s*(\d+)/);
+    if (!m) continue;
+    var tEl = a.querySelector('.text-globalBody2Strong') || a.querySelector('p');
+    var title = tEl ? (tEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+    out.push({ destination: href, title: title.slice(0, 80), points: parseInt(m[1], 10) });
   }
   return out;
 } catch (e) { return []; }
@@ -137,6 +156,16 @@ class NewDashboardDailySet:
             logger (callable, optional): A function to log messages.
         """
         self.logger = logger
+        # Aggregated counts from the most recent `perform` call, mirroring
+        # DailySet.last_totals so the stats layer can record new-dashboard
+        # runs the same way it records legacy ones.
+        self.last_totals = {
+            "already": 0,
+            "newly": 0,
+            "final": 0,
+            "total": 0,
+            "attempted": 0,
+        }
 
     def _log(self, message):
         if self.logger:
@@ -205,15 +234,15 @@ class NewDashboardDailySet:
 
     # -- Clicking activities ---------------------------------------------------
 
-    def _expand_section(self, driver):
+    def _expand_section(self, driver, section_id="dailyset"):
         """
-        Expand the collapsed "Ensemble du jour" section so its cards become
-        visible and clickable. react-aria marks the Disclosure toggle with
-        slot="trigger"; clicking it when aria-expanded="false" opens the panel.
+        Expand a collapsed section so its cards become visible and clickable.
+        react-aria marks the Disclosure toggle with slot="trigger"; clicking it
+        when aria-expanded="false" opens the panel.
         """
         try:
             triggers = driver.find_elements(
-                By.CSS_SELECTOR, "#dailyset button[slot='trigger']"
+                By.CSS_SELECTOR, f"#{section_id} button[slot='trigger']"
             )
         except Exception:
             return
@@ -225,12 +254,10 @@ class NewDashboardDailySet:
             except Exception:
                 continue
 
-    def _locate_anchor(self, driver, destination, index):
-        """Find the daily-set card <a> for `destination`, else the index-th card."""
+    def _locate_anchor(self, driver, destination, index, section_id="dailyset"):
+        """Find the card <a> for `destination` in a section, else the index-th."""
         try:
-            anchors = driver.find_elements(
-                By.CSS_SELECTOR, "#dailyset a[href*='bing.com/search']"
-            )
+            anchors = driver.find_elements(By.CSS_SELECTOR, f"#{section_id} a[href]")
         except Exception:
             return None
         for a in anchors:
@@ -381,9 +408,112 @@ class NewDashboardDailySet:
         except TimeoutException:
             pass
 
+    def _wait_for(self, driver, selector, timeout=15):
+        """Wait until `selector` matches an element on the page."""
+
+        def _ready(d):
+            try:
+                return bool(
+                    d.execute_script(
+                        "return !!document.querySelector(arguments[0]);", selector
+                    )
+                )
+            except Exception:
+                return False
+
+        try:
+            WebDriverWait(driver, timeout).until(_ready)
+        except TimeoutException:
+            pass
+
     # -- Top-level entry point -------------------------------------------------
 
     def perform(self, driver, human, stop_event=None):
+        """
+        Run the new-dashboard point-earning tasks: the Daily Set (/dashboard) and
+        then the "earn-page" activities (/earn). Returns the Daily Set
+        outcome (used to mark today done); the earn pass is best-effort.
+        """
+        daily_ok = self._run_daily_set(driver, human, stop_event=stop_event)
+        if stop_event is not None and stop_event.is_set():
+            return daily_ok
+        try:
+            self._run_more_activities(driver, human, stop_event=stop_event)
+        except Exception as e:
+            if not (stop_event is not None and stop_event.is_set()):
+                self._log(f"[WARNING] 'earn-page' pass failed: {e}")
+        return daily_ok
+
+    def _run_more_activities(self, driver, human, stop_event=None):
+        """
+        Click the incomplete point-earning cards in the /earn "earn-page"
+        section (#moreactivities). Mirrors the legacy "More Activities" section.
+        """
+        self._log("Checking 'earn-page' activities (new dashboard)")
+        try:
+            driver.get(EARN_URL)
+        except Exception as e:
+            self._log(f"[WARNING] Could not open the earn page: {e}")
+            return
+
+        self._wait_for(driver, "#moreactivities", timeout=15)
+        time.sleep(random.uniform(1.5, 2.5))
+        self._expand_section(driver, "moreactivities")
+        time.sleep(random.uniform(0.5, 1.0))
+
+        try:
+            items = driver.execute_script(_MORE_ACTIVITIES_JS)
+        except Exception as e:
+            self._log(f"[WARNING] Could not read 'earn-page' cards: {e}")
+            return
+        if not isinstance(items, list) or not items:
+            self._log("'earn-page': nothing to do.")
+            return
+
+        self._log(f"'earn-page': {len(items)} activity(ies) to do.")
+        main_tab = driver.current_window_handle
+        done = 0
+        for idx, item in enumerate(items):
+            if stop_event is not None and stop_event.is_set():
+                self._log("Stop requested — halting 'earn-page'.")
+                break
+            dest = item.get("destination")
+            title = item.get("title") or "activity"
+            if not isinstance(dest, str) or not dest.startswith("http"):
+                continue
+            self._log(f"Opening activity: {title} (+{item.get('points')})")
+            anchor = self._locate_anchor(driver, dest, idx, section_id="moreactivities")
+            if anchor is not None and self._click_anchor(
+                driver, human, anchor, main_tab, stop_event
+            ):
+                done += 1
+                continue
+            # Fallback: direct navigation (less likely to credit, but better than skip).
+            self._log(f"[INFO] Falling back to direct navigation for '{title}'.")
+            try:
+                driver.get(dest)
+                done += 1
+                time.sleep(random.uniform(2, 4))
+                try:
+                    human.scroll_page()
+                except Exception:
+                    pass
+                time.sleep(random.uniform(2, 4))
+                driver.get(EARN_URL)
+                self._wait_for(driver, "#moreactivities", timeout=10)
+                time.sleep(random.uniform(1, 2))
+                self._expand_section(driver, "moreactivities")
+            except Exception as e:
+                if stop_event is not None and stop_event.is_set():
+                    break
+                self._log(f"[WARNING] Failed to open '{title}': {e}")
+
+        if done:
+            self.last_totals["newly"] = self.last_totals.get("newly", 0) + done
+            self.last_totals["attempted"] = self.last_totals.get("attempted", 0) + done
+        self._log(f"'earn-page': opened {done} activity(ies) this run.")
+
+    def _run_daily_set(self, driver, human, stop_event=None):
         """
         Open the new dashboard, visit each incomplete daily-set activity for
         today, then re-read to confirm progress.
@@ -442,10 +572,16 @@ class NewDashboardDailySet:
             )
 
             incomplete = [it for it in todays if not it.get("isCompleted")]
-            self._log(
-                f"New dashboard daily set: "
-                f"{len(todays) - len(incomplete)}/{len(todays)} already complete."
-            )
+            total = len(todays)
+            already = total - len(incomplete)
+            self.last_totals = {
+                "already": already,
+                "newly": 0,
+                "final": already,
+                "total": total,
+                "attempted": 0,
+            }
+            self._log(f"New dashboard daily set: {already}/{total} already complete.")
 
             if not incomplete:
                 return True
@@ -530,6 +666,10 @@ class NewDashboardDailySet:
                     newly = max(0, len(incomplete) - still_incomplete)
             except Exception:
                 pass
+
+            self.last_totals["attempted"] = attempted
+            self.last_totals["newly"] = newly
+            self.last_totals["final"] = already + newly
 
             if newly > 0:
                 self._log(f"New dashboard daily set: +{newly} completed this run.")

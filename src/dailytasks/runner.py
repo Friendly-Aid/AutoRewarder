@@ -356,6 +356,16 @@ class DailySet:
             bool: True if it's reasonable to mark today as done, False if we
                   made no progress (so the next run can retry).
         """
+        # Reset here so every path (legacy, new, aborted-early) starts from
+        # zeros and the stats layer never folds in counts from a prior run.
+        self.last_totals = {
+            "already": 0,
+            "newly": 0,
+            "final": 0,
+            "total": 0,
+            "attempted": 0,
+        }
+
         variant = variant or self.dashboard_variant or "auto"
 
         if variant == "auto":
@@ -365,9 +375,12 @@ class DailySet:
         if variant == "new":
             from .new_dashboard import NewDashboardDailySet
 
-            return NewDashboardDailySet(logger=self.logger).perform(
-                driver, human, stop_event=stop_event
-            )
+            handler = NewDashboardDailySet(logger=self.logger)
+            result = handler.perform(driver, human, stop_event=stop_event)
+            # Surface the new-dashboard run's counts for the stats layer so
+            # per-account statistics stay accurate on migrated accounts.
+            self.last_totals = dict(handler.last_totals)
+            return result
 
         return self._perform_legacy(driver, human, stop_event=stop_event)
 
