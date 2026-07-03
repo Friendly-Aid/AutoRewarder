@@ -110,6 +110,9 @@ try {
     var a = links[i];
     var href = a.href || a.getAttribute('href') || '';
     if (href.indexOf('bing.com') < 0) continue;
+    // Quests are multi-task punchcards handled separately (see _run_quests);
+    // their entry card links to /earn/quest/<id>, not a Bing search.
+    if (href.indexOf('/earn/quest/') >= 0) continue;
     // Skip completed cards via their green "success" badge (language-independent).
     if (a.querySelector('[class*="statusSuccess"]')) continue;
     var txt = (a.textContent || '').replace(/\s+/g, ' ').trim();
@@ -118,6 +121,61 @@ try {
     var tEl = a.querySelector('.text-globalBody2Strong') || a.querySelector('p');
     var title = tEl ? (tEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
     out.push({ destination: href, title: title.slice(0, 80), points: parseInt(m[1], 10) });
+  }
+  return out;
+} catch (e) { return []; }
+"""
+
+# Discover /earn "quest" punchcards. Each is an <a> linking to its own
+# /earn/quest/<id> page (not a Bing search), with a "+N" points badge and an
+# "N/M" progress counter. Both markers are numeric / design-token based, so this
+# stays language-independent. The progress lets the caller skip finished quests.
+_QUESTS_JS = r"""
+try {
+  var out = [];
+  var seen = {};
+  var links = document.querySelectorAll('a[href*="/earn/quest/"]');
+  for (var i = 0; i < links.length; i++) {
+    var a = links[i];
+    var href = a.href || a.getAttribute('href') || '';
+    if (!href) continue;
+    var key = href.split('?')[0].split('#')[0];
+    if (seen[key]) continue;
+    seen[key] = 1;
+    var txt = (a.textContent || '').replace(/\s+/g, ' ').trim();
+    var pts = 0; var pm = txt.match(/\+\s*(\d+)/); if (pm) pts = parseInt(pm[1], 10);
+    var done = null, total = null;
+    var prog = txt.match(/(\d+)\s*\/\s*(\d+)/);
+    if (prog) { done = parseInt(prog[1], 10); total = parseInt(prog[2], 10); }
+    var tEl = a.querySelector('.text-globalBody2Strong') || a.querySelector('p');
+    var title = tEl ? (tEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+    out.push({ url: key, title: title.slice(0, 80), points: pts, done: done, total: total });
+  }
+  return out;
+} catch (e) { return []; }
+"""
+
+# Read the actionable tasks on a quest page. Tasks live in the design-token
+# "rewardsTableAltBg" list; each is a Bing-search link that must be really
+# clicked to credit. A task is actionable only if its link is NOT disabled:
+# punchcard tasks unlock one per ~24h and carry aria-disabled / data-disabled
+# until then, and completed tasks have no link at all.
+_QUEST_TASKS_JS = r"""
+try {
+  var out = [];
+  var scope = document.querySelector('[class*="rewardsTableAltBg"]') || document;
+  var links = scope.querySelectorAll('[href*="bing.com/search"]');
+  for (var i = 0; i < links.length; i++) {
+    var el = links[i];
+    if ((el.getAttribute('aria-disabled') || '') === 'true') continue;
+    if ((el.getAttribute('data-disabled') || '') === 'true') continue;
+    if (el.hasAttribute('disabled')) continue;
+    var href = el.getAttribute('href') || '';
+    if (!href) continue;
+    var row = el.closest('div');
+    var tEl = row ? row.querySelector('h3, .text-globalBody2Strong') : null;
+    var title = tEl ? (tEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+    out.push({ destination: href, title: title.slice(0, 80) });
   }
   return out;
 } catch (e) { return []; }
@@ -268,6 +326,32 @@ class NewDashboardDailySet:
                 continue
         if 0 <= index < len(anchors):
             return anchors[index]
+        return None
+
+    def _locate_quest_task(self, driver, destination):
+        """
+        Find the actionable task link for `destination` on a quest page. Unlike
+        daily-set cards, a quest task's clickable is a <span role="link"> (not an
+        <a>), so this queries by href within the task list and skips disabled
+        (locked) links.
+        """
+        try:
+            links = driver.find_elements(
+                By.CSS_SELECTOR,
+                '[class*="rewardsTableAltBg"] [href*="bing.com/search"]',
+            )
+        except Exception:
+            return None
+        for el in links:
+            try:
+                if (el.get_attribute("aria-disabled") or "").lower() == "true":
+                    continue
+                if (el.get_attribute("data-disabled") or "").lower() == "true":
+                    continue
+                if el.get_attribute("href") == destination:
+                    return el
+            except Exception:
+                continue
         return None
 
     def _click_anchor(self, driver, human, anchor, main_tab, stop_event):
@@ -430,9 +514,9 @@ class NewDashboardDailySet:
 
     def perform(self, driver, human, stop_event=None):
         """
-        Run the new-dashboard point-earning tasks: the Daily Set (/dashboard) and
-        then the "earn-page" activities (/earn). Returns the Daily Set
-        outcome (used to mark today done); the earn pass is best-effort.
+        Run the new-dashboard point-earning tasks: the Daily Set (/dashboard),
+        the "earn-page" activities and the quests (/earn). Returns the Daily Set
+        outcome (used to mark today done); the earn/quest passes are best-effort.
         """
         daily_ok = self._run_daily_set(driver, human, stop_event=stop_event)
         if stop_event is not None and stop_event.is_set():
@@ -442,6 +526,13 @@ class NewDashboardDailySet:
         except Exception as e:
             if not (stop_event is not None and stop_event.is_set()):
                 self._log(f"[WARNING] 'earn-page' pass failed: {e}")
+        if stop_event is not None and stop_event.is_set():
+            return daily_ok
+        try:
+            self._run_quests(driver, human, stop_event=stop_event)
+        except Exception as e:
+            if not (stop_event is not None and stop_event.is_set()):
+                self._log(f"[WARNING] Quest pass failed: {e}")
         return daily_ok
 
     def _run_more_activities(self, driver, human, stop_event=None):
@@ -512,6 +603,115 @@ class NewDashboardDailySet:
             self.last_totals["newly"] = self.last_totals.get("newly", 0) + done
             self.last_totals["attempted"] = self.last_totals.get("attempted", 0) + done
         self._log(f"'earn-page': opened {done} activity(ies) this run.")
+
+    def _run_quests(self, driver, human, stop_event=None):
+        """
+        Complete the currently-actionable tasks inside /earn "quest" punchcards.
+
+        A quest is a multi-task card that links to its own /earn/quest/<id> page;
+        each task is a Bing-search link that must be really clicked to credit
+        (like a daily-set card). Punchcard tasks are time-gated — typically only
+        one unlocks per ~24h — so a run completes only what's unlocked right now;
+        locked tasks carry aria-disabled / data-disabled and are skipped. Full
+        completion of a quest therefore takes several daily runs.
+        """
+        self._log("Checking 'earn-page' quests (new dashboard)")
+        try:
+            driver.get(EARN_URL)
+            self._wait_ready(driver)
+            time.sleep(random.uniform(1.5, 2.5))
+        except Exception as e:
+            self._log(f"[WARNING] Could not open the earn page for quests: {e}")
+            return
+
+        # Expand collapsible sections so lazily-rendered quest cards materialize.
+        self._expand_section(driver, "moreactivities")
+        time.sleep(random.uniform(0.5, 1.0))
+
+        try:
+            quests = driver.execute_script(_QUESTS_JS)
+        except Exception as e:
+            self._log(f"[WARNING] Could not read quests: {e}")
+            return
+        if not isinstance(quests, list) or not quests:
+            self._log("Quests: none found.")
+            return
+
+        # Skip quests already fully complete (progress N/N).
+        pending = []
+        for q in quests:
+            if not isinstance(q, dict):
+                continue
+            url = q.get("url")
+            if not isinstance(url, str) or "/earn/quest/" not in url:
+                continue
+            d, t = q.get("done"), q.get("total")
+            if isinstance(d, int) and isinstance(t, int) and t > 0 and d >= t:
+                continue
+            pending.append(q)
+
+        if not pending:
+            self._log("Quests: all complete.")
+            return
+
+        self._log(f"Quests: {len(pending)} incomplete quest(s) to check.")
+        main_tab = driver.current_window_handle
+        opened = 0
+        for q in pending:
+            if stop_event is not None and stop_event.is_set():
+                self._log("Stop requested — halting quests.")
+                break
+            url = q["url"]
+            title = q.get("title") or "quest"
+            try:
+                driver.get(url)
+                self._wait_ready(driver)
+                time.sleep(random.uniform(1.5, 2.5))
+            except Exception as e:
+                self._log(f"[WARNING] Could not open quest '{title}': {e}")
+                continue
+
+            try:
+                tasks = driver.execute_script(_QUEST_TASKS_JS)
+            except Exception as e:
+                self._log(f"[WARNING] Could not read tasks for quest '{title}': {e}")
+                continue
+            if not isinstance(tasks, list) or not tasks:
+                self._log(
+                    f"Quest '{title}': no actionable task right now "
+                    "(locked or complete)."
+                )
+                continue
+
+            self._log(f"Quest '{title}': {len(tasks)} actionable task(s).")
+            for task in tasks:
+                if stop_event is not None and stop_event.is_set():
+                    break
+                dest = task.get("destination")
+                ttitle = task.get("title") or "task"
+                if not isinstance(dest, str) or not dest.startswith("http"):
+                    continue
+                self._log(f"Opening quest task: {ttitle}")
+                anchor = self._locate_quest_task(driver, dest)
+                if anchor is not None and self._click_anchor(
+                    driver, human, anchor, main_tab, stop_event
+                ):
+                    opened += 1
+                    # The click returns to the dashboard or quest tab; re-open the
+                    # quest page so the next task's element can be relocated fresh.
+                    try:
+                        driver.get(url)
+                        self._wait_ready(driver)
+                        time.sleep(random.uniform(1, 2))
+                    except Exception:
+                        pass
+
+        if opened:
+            self.last_totals["newly"] = self.last_totals.get("newly", 0) + opened
+            self.last_totals["attempted"] = (
+                self.last_totals.get("attempted", 0) + opened
+            )
+        self._log(f"Quests: opened {opened} task(s) this run.")
 
     def _run_daily_set(self, driver, human, stop_event=None):
         """
