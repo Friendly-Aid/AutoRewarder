@@ -84,14 +84,20 @@ try {
   for (var i = 0; i < links.length; i++) {
     var a = links[i];
     var href = a.href || a.getAttribute('href') || '';
-    if (href.indexOf('bing.com') < 0 && href.indexOf('/search') < 0) continue;
-    var txt = (a.textContent || '').replace(/\s+/g, ' ').trim();
-    var low = txt.toLowerCase();
+    // Only real daily-set activities point at a Bing search. This also excludes
+    // the section header's "Gagner plus" / "Earn more" link (→ /earn), whose
+    // absolute href still contains "bing.com".
+    if (href.indexOf('bing.com/search') < 0) continue;
+    // Title only: the card's bold title node, not the whole card text (which
+    // also holds the description, points and status).
+    var tEl = a.querySelector('.text-globalBody2Strong') || a.querySelector('p');
+    var title = tEl ? (tEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+    var low = (a.textContent || '').toLowerCase();
     var done = false;
     for (var d = 0; d < doneWords.length; d++) {
       if (low.indexOf(doneWords[d]) >= 0) { done = true; break; }
     }
-    out.push({ destination: href, title: txt.slice(0, 60), isCompleted: done, date: null });
+    out.push({ destination: href, title: title.slice(0, 80), isCompleted: done, date: null });
   }
   return out;
 } catch (e) { return []; }
@@ -272,11 +278,23 @@ class NewDashboardDailySet:
             # Brief settle so late RSC chunks finish streaming in.
             time.sleep(random.uniform(2, 3))
 
-            # Primary: poll the embedded RSC JSON (streams in progressively).
+            # Primary: poll the embedded RSC JSON (streams in progressively). It
+            # is authoritative — it carries the exact destination + isCompleted.
             items = self._read_items_polling(driver)
             source = "json"
             # Fallback: read today's cards from the rendered #dailyset section.
             if not items:
+                # Always log why the JSON path came up empty, even when the DOM
+                # fallback succeeds, so we can tell "chunk not streamed yet" from
+                # "extraction bug" without another round-trip.
+                diag = self._diagnostics(driver)
+                self._log(
+                    "[INFO] New-dashboard JSON had no daily-set items — "
+                    f"chunks={diag.get('chunks')} blobLen={diag.get('blobLen')} "
+                    f"hasDailySetItems={diag.get('hasKey')} "
+                    f"hasDailysetSection={diag.get('hasDailyset')} "
+                    f"url={diag.get('url')!r}"
+                )
                 items = self._read_items_dom(driver)
                 source = "dom"
 
