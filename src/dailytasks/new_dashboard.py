@@ -237,13 +237,17 @@ class NewDashboardDailySet:
         self.logger = logger
         # Aggregated counts from the most recent `perform` call, mirroring
         # DailySet.last_totals so the stats layer can record new-dashboard
-        # runs the same way it records legacy ones.
+        # runs the same way it records legacy ones. `newly` counts verified
+        # daily-set completions only; `earn` and `quests` count the /earn cards
+        # and quest tasks opened this run (clicked, not re-verified).
         self.last_totals = {
             "already": 0,
             "newly": 0,
             "final": 0,
             "total": 0,
             "attempted": 0,
+            "earn": 0,
+            "quests": 0,
         }
 
     def _log(self, message):
@@ -778,9 +782,10 @@ class NewDashboardDailySet:
                 self._log(f"[WARNING] Failed to open '{title}': {e}")
 
         if done:
-            # These opens aren't re-read/confirmed, so they count as attempts
-            # only; `newly` stays reserved for verified completions (the
-            # daily-set pass sets it from a completion re-read).
+            # These opens aren't re-read/confirmed, so they count in their own
+            # `earn` bucket (and as attempts); `newly` stays reserved for
+            # verified daily-set completions.
+            self.last_totals["earn"] = self.last_totals.get("earn", 0) + done
             self.last_totals["attempted"] = self.last_totals.get("attempted", 0) + done
         self._log(f"'earn-page': opened {done} activity(ies) this run.")
 
@@ -909,8 +914,9 @@ class NewDashboardDailySet:
                         pass
 
         if opened:
-            # Unverified opens count as attempts only; `newly` is reserved for
-            # verified completions.
+            # Unverified opens count in their own `quests` bucket (and as
+            # attempts); `newly` is reserved for verified completions.
+            self.last_totals["quests"] = self.last_totals.get("quests", 0) + opened
             self.last_totals["attempted"] = (
                 self.last_totals.get("attempted", 0) + opened
             )
@@ -977,6 +983,8 @@ class NewDashboardDailySet:
                 "final": already,
                 "total": total,
                 "attempted": 0,
+                "earn": 0,
+                "quests": 0,
             }
             self._log(f"New dashboard daily set: {already}/{total} already complete.")
 

@@ -90,6 +90,8 @@ class DailySet:
             "final": 0,
             "total": 0,
             "attempted": 0,
+            "earn": 0,
+            "quests": 0,
         }
 
     def _log(self, message):
@@ -364,6 +366,8 @@ class DailySet:
             "final": 0,
             "total": 0,
             "attempted": 0,
+            "earn": 0,
+            "quests": 0,
         }
 
         variant = variant or self.dashboard_variant or "auto"
@@ -450,6 +454,8 @@ class DailySet:
             "final": 0,
             "total": 0,
             "attempted": 0,
+            "earn": 0,
+            "quests": 0,
         }
 
         try:

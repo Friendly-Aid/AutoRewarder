@@ -72,6 +72,14 @@
           <span class="metric-label">Daily cards</span>
         </div>
         <div class="metric">
+          <span class="metric-value" id="m_earn">0</span>
+          <span class="metric-label">Earn cards</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value" id="m_quests">0</span>
+          <span class="metric-label">Quest tasks</span>
+        </div>
+        <div class="metric">
           <span class="metric-value" id="m_runs">0</span>
           <span class="metric-label">Runs</span>
         </div>
@@ -86,6 +94,8 @@
           <span class="legend-item"><span class="legend-dot legend-pc"></span>PC</span>
           <span class="legend-item"><span class="legend-dot legend-mobile"></span>Mobile</span>
           <span class="legend-item"><span class="legend-dot legend-daily"></span>Daily</span>
+          <span class="legend-item"><span class="legend-dot legend-earn"></span>Earn</span>
+          <span class="legend-item"><span class="legend-dot legend-quests"></span>Quests</span>
         </div>
       </div>
       <div id="runs_chart" class="runs-chart"></div>
@@ -191,12 +201,16 @@
       if (ls.pc_searches) parts.push(ls.pc_searches + ' PC');
       if (ls.mobile_searches) parts.push(ls.mobile_searches + ' mobile');
       if (ls.daily_cards) parts.push(ls.daily_cards + ' cards');
+      if (ls.earn_cards) parts.push(ls.earn_cards + ' earn');
+      if (ls.quest_tasks) parts.push(ls.quest_tasks + ' quests');
       sessSub.textContent = parts.length ? parts.join(' · ') : 'No activity recorded yet';
 
       // Lifetime metrics.
       document.getElementById('m_pc').textContent = fmt(life.pc_searches || 0);
       document.getElementById('m_mobile').textContent = fmt(life.mobile_searches || 0);
       document.getElementById('m_cards').textContent = fmt(life.daily_cards || 0);
+      document.getElementById('m_earn').textContent = fmt(life.earn_cards || 0);
+      document.getElementById('m_quests').textContent = fmt(life.quest_tasks || 0);
       document.getElementById('m_runs').textContent = fmt(life.runs || 0);
 
       render_runs_chart(stats.daily || {}, stats.constants);
@@ -242,7 +256,9 @@
       const pps = (consts && consts.points_per_search) || 3;
       const ppc = (consts && consts.points_per_card) || 10;
 
-      // dailyData is { "YYYY-MM-DD": {pc, mobile, cards, runs} } from backend.
+      // dailyData is { "YYYY-MM-DD": {pc, mobile, cards, earn, quests, runs} }
+      // from the backend. Daily cards, /earn cards and quest tasks each get
+      // their own stacked segment (older records simply lack earn/quests → 0).
       const byDay = new Map();
       for (const key of Object.keys(dailyData || {})) {
         if (key.length !== 10) continue;
@@ -251,6 +267,8 @@
           pc: (v.pc || 0) * pps,
           mobile: (v.mobile || 0) * pps,
           daily: (v.cards || 0) * ppc,
+          earn: (v.earn || 0) * ppc,
+          quests: (v.quests || 0) * ppc,
         });
       }
 
@@ -266,13 +284,15 @@
 
       const totals = days.map(d => {
         const e = byDay.get(d);
-        return e.pc + e.mobile + e.daily;
+        return e.pc + e.mobile + e.daily + e.earn + e.quests;
       });
       const max = Math.max(1, ...totals);
       const MAX_PX = 128;  // pixel height of the tallest day's bar
 
       // bottom → top order (column-reverse appends first child at the bottom).
       const SEGMENTS = [
+        { key: 'quests', cls: 'bar-quests', label: 'Quests' },
+        { key: 'earn', cls: 'bar-earn', label: 'Earn' },
         { key: 'daily', cls: 'bar-daily', label: 'Daily' },
         { key: 'mobile', cls: 'bar-mobile', label: 'Mobile' },
         { key: 'pc', cls: 'bar-pc', label: 'PC' },
@@ -280,7 +300,7 @@
 
       days.forEach(d => {
         const e = byDay.get(d);
-        const total = e.pc + e.mobile + e.daily;
+        const total = e.pc + e.mobile + e.daily + e.earn + e.quests;
 
         const col = document.createElement('div');
         col.className = 'bar-col';
@@ -293,6 +313,7 @@
         stack.className = 'bar-stack';
         stack.title = `${day_label(d)}\nPC: ${fmt(e.pc)} pts` +
           `\nMobile: ${fmt(e.mobile)} pts\nDaily: ${fmt(e.daily)} pts` +
+          `\nEarn: ${fmt(e.earn)} pts\nQuests: ${fmt(e.quests)} pts` +
           `\nTotal: ${fmt(total)} pts`;
 
         for (const seg of SEGMENTS) {

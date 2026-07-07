@@ -119,7 +119,13 @@ class AutoRewarderAPI:
         self.stats = None
 
         # Per-run stats accumulators, reset at the start of every main() call.
-        self._session_counts = {"pc": 0, "mobile": 0, "cards": 0}
+        self._session_counts = {
+            "pc": 0,
+            "mobile": 0,
+            "cards": 0,
+            "earn": 0,
+            "quests": 0,
+        }
         self._last_scraped_balance = None
         # Last balance-scrape diagnostic ({value, via, candidates, url, title}),
         # surfaced to the dashboard so a failed read can be debugged in place.
@@ -1748,6 +1754,8 @@ class AutoRewarderAPI:
                     "pc_searches": stats["lifetime"]["pc_searches"],
                     "mobile_searches": stats["lifetime"]["mobile_searches"],
                     "daily_cards": stats["lifetime"]["daily_cards"],
+                    "earn_cards": stats["lifetime"].get("earn_cards", 0),
+                    "quest_tasks": stats["lifetime"].get("quest_tasks", 0),
                 }
             )
         return result
@@ -2161,7 +2169,13 @@ class AutoRewarderAPI:
 
         # Reset per-run stats accumulators. _run_phase / _run_daily_only feed
         # these; _record_session_stats() folds them into stats.json at the end.
-        self._session_counts = {"pc": 0, "mobile": 0, "cards": 0}
+        self._session_counts = {
+            "pc": 0,
+            "mobile": 0,
+            "cards": 0,
+            "earn": 0,
+            "quests": 0,
+        }
         self._last_scraped_balance = None
 
         try:
@@ -2250,6 +2264,8 @@ class AutoRewarderAPI:
                 pc_searches=self._session_counts.get("pc", 0),
                 mobile_searches=self._session_counts.get("mobile", 0),
                 daily_cards=self._session_counts.get("cards", 0),
+                earn_cards=self._session_counts.get("earn", 0),
+                quest_tasks=self._session_counts.get("quests", 0),
                 balance=self._last_scraped_balance,
             )
         except Exception as e:
@@ -2312,7 +2328,10 @@ class AutoRewarderAPI:
             )
             # Record cards completed + scrape the balance while we're still on
             # the rewards dashboard, before any Stop check returns early.
-            self._session_counts["cards"] += self.daily_set.last_totals.get("newly", 0)
+            totals = self.daily_set.last_totals
+            self._session_counts["cards"] += totals.get("newly", 0)
+            self._session_counts["earn"] += totals.get("earn", 0)
+            self._session_counts["quests"] += totals.get("quests", 0)
             self._try_scrape_balance()
             if self._stop_event.is_set():
                 self.log("Daily tasks aborted by Stop.")
@@ -2383,9 +2402,10 @@ class AutoRewarderAPI:
                 ran_daily_set = True
                 # Record cards + scrape the balance while still on the rewards
                 # dashboard, before the Stop check can short-circuit.
-                self._session_counts["cards"] += self.daily_set.last_totals.get(
-                    "newly", 0
-                )
+                totals = self.daily_set.last_totals
+                self._session_counts["cards"] += totals.get("newly", 0)
+                self._session_counts["earn"] += totals.get("earn", 0)
+                self._session_counts["quests"] += totals.get("quests", 0)
                 self._try_scrape_balance()
                 if not self._stop_event.is_set():
                     if success:
