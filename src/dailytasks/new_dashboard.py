@@ -285,16 +285,52 @@ class NewDashboardDailySet:
 
     def _read_items_polling(self, driver, attempts=8, delay=1.5):
         """
-        Poll `_read_items` until items appear. The dashboard streams the daily-set
-        RSC chunk progressively, so it can land a beat after the page's load
-        event; a single read often races ahead of it.
+        Poll `_read_items` until the item set stabilizes. The dashboard streams
+        the daily-set RSC chunks progressively, so an early read can catch a
+        partial payload (e.g. 2 of 3 cards streamed in at that instant);
+        returning on the first non-empty read would silently drop the cards
+        still in flight. Done when the count stops changing between two
+        consecutive reads, or when the payload drains post-hydration (a
+        non-empty snapshot followed by an empty read — nothing more will
+        stream). Always returns the largest snapshot seen.
         """
+        best = []
+        prev_count = None
         for _ in range(max(1, attempts)):
             items = self._read_items(driver)
-            if items:
-                return items
+            if len(items) > len(best):
+                best = items
+            if best and (not items or len(items) == prev_count):
+                return best
+            prev_count = len(items)
             time.sleep(delay)
-        return []
+        return best
+
+    @staticmethod
+    def _choose_today(json_today, dom_today):
+        """
+        Pick the trustworthy "today" card set between the two sources.
+
+        The rendered #dailyset section is ground truth for WHICH cards are
+        today's (it only ever shows today); the RSC JSON is authoritative for
+        completion flags but can be partially streamed — worst case its
+        snapshot holds only another, already-completed day, which would read
+        as "nothing to do" and silently skip (and mark) the whole set.
+
+        Rules: DOM wins when it sees more of today than the JSON group, or
+        when the JSON group shares no destination with the DOM cards (i.e. the
+        JSON group is some other day). Otherwise the JSON group wins.
+
+        Returns:
+            tuple: (items, source) with source "dom" or "json".
+        """
+        if len(dom_today) > len(json_today):
+            return dom_today, "dom"
+        if dom_today:
+            dom_dests = {it.get("destination") for it in dom_today}
+            if not any(it.get("destination") in dom_dests for it in json_today):
+                return dom_today, "dom"
+        return json_today, "json"
 
     def _read_items_dom(self, driver):
         """Fallback: read today's daily-set activities from the rendered DOM."""
@@ -946,19 +982,14 @@ class NewDashboardDailySet:
 
             # Primary: poll the embedded RSC JSON (streams in progressively). It
             # is authoritative — it carries the exact destination + isCompleted.
-            items = self._read_items_polling(driver)
-            source = "json"
-            # Fallback: read today's cards from the rendered #dailyset section.
-            # window.__next_f is normally drained after hydration, so the JSON
-            # path is expected to be empty here — the DOM is the real source at
-            # runtime. A genuine failure (neither path yields cards) is reported
-            # by the "No daily-set activities found" warning below, with the same
-            # diagnostics, so there's nothing to log on this routine fallback.
-            if not items:
-                items = self._read_items_dom(driver)
-                source = "dom"
-
-            todays = self._todays_items(items)
+            # Cross-checked against the rendered #dailyset DOM by _choose_today:
+            # the JSON is often drained post-hydration or partially streamed, so
+            # the DOM decides which cards really are today's. A genuine failure
+            # (neither source yields cards) is reported by the "No daily-set
+            # activities found" warning below.
+            json_today = self._todays_items(self._read_items_polling(driver))
+            dom_today = self._todays_items(self._read_items_dom(driver))
+            todays, source = self._choose_today(json_today, dom_today)
             if not todays:
                 diag = self._diagnostics(driver)
                 self._log(
@@ -1067,8 +1098,12 @@ class NewDashboardDailySet:
                 # cards as we started with — retry (JSON then DOM) until it does.
                 after = []
                 for _ in range(5):
-                    after = self._todays_items(
-                        self._read_items(driver) or self._read_items_dom(driver)
+                    # Same source arbitration as the initial read: a partial
+                    # (or other-day) JSON snapshot must not beat the DOM, or
+                    # missing cards would be counted as completed.
+                    after, _src = self._choose_today(
+                        self._todays_items(self._read_items(driver)),
+                        self._todays_items(self._read_items_dom(driver)),
                     )
                     if len(after) >= len(todays):
                         break
