@@ -33,7 +33,9 @@ POINTS_PER_CARD = 10
 _DAILY_KEEP = 90
 
 # JS executed on rewards.bing.com (or a Bing SERP) to read the user's current
-# available-points balance. Tries a series of known selectors and returns an
+# available-points balance. Works on both the legacy mee-rewards-* dashboard
+# (DOM selectors) and the new Next.js dashboard (RSC payload in window.__next_f).
+# Tries a series of known selectors and returns an
 # object {value, via, candidates}. `value` is the first plausible integer found
 # (thousand separators stripped) or null; `candidates` is a small sample of
 # what each selector matched, logged when value is null so the real (locale-
@@ -65,6 +67,10 @@ return (function () {
     'mee-rewards-user-status-banner-balance mee-rewards-counter-animation span',
     'mee-rewards-user-status-banner-balance .pointsValue',
     '#balanceToolTipDiv .pointsValue',
+    // New (Next.js) dashboard: the "Points disponibles" card links to /redeem
+    // and shows the balance in a .text-pageHeader node. Scoped to that card so
+    // we don't pick the member-name header (same class, different anchor).
+    'a[href="/redeem"] .text-pageHeader',
     '#fly_id_rc', '#id_rc'
   ];
   var candidates = [];
@@ -88,6 +94,39 @@ return (function () {
       }
     }
   }
+  // New (Next.js) dashboard: none of the legacy mee-rewards-* nodes exist. The
+  // available-points balance is streamed into the RSC payload (window.__next_f)
+  // as "availablePoints":<int> / "balance":<int> (the ProfileUpdate value), not
+  // rendered into any stable DOM node. Read it from there. On the legacy
+  // dashboard or a Bing SERP __next_f is absent, so this block is a no-op.
+  try {
+    if (window.__next_f) {
+      var parts = [];
+      for (var k = 0; k < window.__next_f.length; k++) {
+        var e = window.__next_f[k];
+        if (Array.isArray(e)) { if (typeof e[1] === 'string') parts.push(e[1]); }
+        else if (typeof e === 'string') { parts.push(e); }
+      }
+      var blob = parts.join('');
+      // Prefer availablePoints; fall back to balance. Take the last match so a
+      // client-refreshed value wins over an earlier server-rendered one.
+      var keys = ['availablePoints', 'balance'];
+      for (var ki = 0; ki < keys.length; ki++) {
+        var re = new RegExp('"' + keys[ki] + '"\\s*:\\s*(\\d+)', 'g');
+        var m, last = null;
+        while ((m = re.exec(blob)) !== null) { last = parseInt(m[1], 10); }
+        if (last != null && isFinite(last) && last >= 0) {
+          if (candidates.length < 14) {
+            candidates.push('__next_f.' + keys[ki] + ' => [' + last + ']');
+          }
+          return {
+            value: last, via: 'new-dashboard:' + keys[ki], candidates: candidates,
+            url: location.href, title: document.title
+          };
+        }
+      }
+    }
+  } catch (eNext) { /* fall through to null */ }
   return {
     value: null, via: null, candidates: candidates,
     url: location.href, title: document.title
@@ -177,6 +216,8 @@ class StatsManager:
                 "pc_searches": 0,
                 "mobile_searches": 0,
                 "daily_cards": 0,
+                "earn_cards": 0,
+                "quest_tasks": 0,
                 "runs": 0,
                 "points_estimate": 0,
             },
@@ -193,6 +234,8 @@ class StatsManager:
                 "pc_searches": 0,
                 "mobile_searches": 0,
                 "daily_cards": 0,
+                "earn_cards": 0,
+                "quest_tasks": 0,
                 "points_estimate": 0,
                 "points_delta": None,
             },
@@ -311,7 +354,13 @@ class StatsManager:
         return stats
 
     def record_session(
-        self, pc_searches=0, mobile_searches=0, daily_cards=0, balance=None
+        self,
+        pc_searches=0,
+        mobile_searches=0,
+        daily_cards=0,
+        earn_cards=0,
+        quest_tasks=0,
+        balance=None,
     ):
         """
         Record one completed run: bump lifetime counters, refresh the
@@ -321,7 +370,9 @@ class StatsManager:
         Args:
             pc_searches (int): successful PC searches this run.
             mobile_searches (int): successful Mobile searches this run.
-            daily_cards (int): Daily Set / More Activities cards newly completed.
+            daily_cards (int): Daily Set cards newly completed (verified).
+            earn_cards (int): /earn point-earning cards opened this run.
+            quest_tasks (int): quest punchcard tasks opened this run.
             balance (int | None): scraped real balance, or None if unavailable.
 
         Returns:
@@ -330,23 +381,34 @@ class StatsManager:
         pc = max(0, int(pc_searches or 0))
         mobile = max(0, int(mobile_searches or 0))
         cards = max(0, int(daily_cards or 0))
+        earn = max(0, int(earn_cards or 0))
+        quests = max(0, int(quest_tasks or 0))
 
         # Nothing happened (e.g. an empty batch in advanced scheduling and no
         # balance to refresh) — don't pollute the timeline with a no-op run.
-        if pc == 0 and mobile == 0 and cards == 0 and balance is None:
+        if (
+            pc == 0
+            and mobile == 0
+            and cards == 0
+            and earn == 0
+            and quests == 0
+            and (balance is None)
+        ):
             return self.get_stats()
 
         stats = self.get_stats()
         session_estimate = (
             pc * POINTS_PER_SEARCH
             + mobile * POINTS_PER_SEARCH
-            + cards * POINTS_PER_CARD
+            + (cards + earn + quests) * POINTS_PER_CARD
         )
 
         lifetime = stats["lifetime"]
         lifetime["pc_searches"] += pc
         lifetime["mobile_searches"] += mobile
         lifetime["daily_cards"] += cards
+        lifetime["earn_cards"] = lifetime.get("earn_cards", 0) + earn
+        lifetime["quest_tasks"] = lifetime.get("quest_tasks", 0) + quests
         lifetime["runs"] += 1
         lifetime["points_estimate"] += session_estimate
 
@@ -368,18 +430,24 @@ class StatsManager:
             "pc_searches": pc,
             "mobile_searches": mobile,
             "daily_cards": cards,
+            "earn_cards": earn,
+            "quest_tasks": quests,
             "points_estimate": session_estimate,
             "points_delta": points_delta,
         }
 
-        # Fold this run into today's per-day aggregate.
+        # Fold this run into today's per-day aggregate. Pre-existing day
+        # buckets from older stats.json files lack the earn/quests keys, so
+        # those are folded in .get-safely.
         today = now_iso[:10]
         bucket = stats["daily"].setdefault(
-            today, {"pc": 0, "mobile": 0, "cards": 0, "runs": 0}
+            today, {"pc": 0, "mobile": 0, "cards": 0, "earn": 0, "quests": 0, "runs": 0}
         )
         bucket["pc"] += pc
         bucket["mobile"] += mobile
         bucket["cards"] += cards
+        bucket["earn"] = bucket.get("earn", 0) + earn
+        bucket["quests"] = bucket.get("quests", 0) + quests
         bucket["runs"] += 1
         stats["daily"] = self._trim_daily(stats["daily"])
 

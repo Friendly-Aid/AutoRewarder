@@ -731,10 +731,12 @@ input[type="number"]:focus {
   display: inline-block;
 }
 
-/* Shared segment / legend colours (PC, Mobile, Daily). */
+/* Shared segment / legend colours (PC, Mobile, Daily, Earn, Quests). */
 .legend-pc,     .bar-pc     { background-color: var(--accent); }
 .legend-mobile, .bar-mobile { background-color: #a78bfa; }
 .legend-daily,  .bar-daily  { background-color: var(--success); }
+.legend-earn,   .bar-earn   { background-color: #f59e0b; }
+.legend-quests, .bar-quests { background-color: #f472b6; }
 
 /* =========================================================================
    Activity feed
