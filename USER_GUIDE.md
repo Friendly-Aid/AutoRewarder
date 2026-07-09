@@ -280,7 +280,7 @@ For best results:
 
 For any issues, check the [Troubleshooting](#troubleshooting) section below.
 
-If your issue isn't listed, please open an issue on GitHub or [contact me](mailto:sinosafarov1919@gmail.com).
+If your issue isn't listed, please open an issue on GitHub.
 
 ---
 
@@ -350,6 +350,7 @@ A: Currently, the pre-built installer and standalone executable are only availab
 ---
 
 **Last Updated**: June 2026
+
 **Version**: 3.4
 
 Enjoy using AutoRewarder! 🎉
