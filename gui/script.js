@@ -4,6 +4,13 @@
 
 let accountsCache = [];
 let currentAccountId = null;
+// True while the background WebDriver warmup (which also refreshes the balance)
+// is running at launch. Start must stay disabled until it finishes, so a run
+// can't open a second driver on the same Edge profile.
+let driverWarmingUp = false;
+// True while a balance scrape holds a driver (launch refresh, manual refresh,
+// or account-switch refresh). Start must stay disabled during it too.
+let balanceFetching = false;
 
 // =========================================================================
 // Toasts
@@ -321,7 +328,7 @@ function enable_start_button() {
   const label = btn.querySelector('.btn-label');
   if (label) label.textContent = 'Start run';
   const current = accountsCache.find(a => a.id === currentAccountId);
-  btn.disabled = !(current && current.first_setup_done);
+  btn.disabled = !(current && current.first_setup_done) || driverWarmingUp || balanceFetching;
 
   // Stop button is meaningful only while a run is in progress.
   const stopBtn = document.getElementById('stop_btn');
@@ -383,6 +390,82 @@ function update_status_indicator(forceState) {
 
 function show_history() {
   pywebview.api.open_history_window();
+}
+
+function show_stats() {
+  if (!window.pywebview || !pywebview.api || !pywebview.api.open_stats_window) return;
+  pywebview.api.open_stats_window();
+}
+
+/**
+ * Format a points number for the compact card: thousands separators, with a
+ * leading "~" when the figure is an estimate (no real balance scraped yet).
+ */
+function _fmt_points(value, isEstimate) {
+  if (value == null || isNaN(value)) return '—';
+  const sign = value > 0 && isEstimate === 'delta' ? '+' : '';
+  const prefix = (isEstimate === true && value > 0) ? '~' : '';
+  return prefix + sign + Number(value).toLocaleString();
+}
+
+/**
+ * Toggle the compact stats card's "searching" animation. Called from Python
+ * while it scrapes the real balance (at launch, or on a manual refresh).
+ */
+function set_stats_loading(on) {
+  balanceFetching = Boolean(on);
+  const card = document.getElementById('stats_card');
+  if (card) card.classList.toggle('stats-loading', balanceFetching);
+
+  // A balance scrape holds a driver on the profile → block Start meanwhile.
+  const btn = document.getElementById('start_btn');
+  if (!btn) return;
+  const label = btn.querySelector('.btn-label');
+  const txt = label ? label.textContent : '';
+  if (txt === 'Running…') return;  // a run owns the button; leave it alone
+  if (balanceFetching) {
+    btn.disabled = true;
+    if (label) label.textContent = 'Loading…';
+  } else {
+    const current = accountsCache.find(a => a.id === currentAccountId);
+    btn.disabled = !(current && current.first_setup_done) || driverWarmingUp;
+    if (label && !driverWarmingUp) label.textContent = 'Start run';
+  }
+}
+
+/**
+ * Refresh the compact stats card for the current account. Called on load,
+ * after switching accounts, and (from Python) at the end of every run.
+ */
+function refresh_stats_ui() {
+  if (!window.pywebview || !pywebview.api || !pywebview.api.get_stats) return;
+  const totalEl = document.getElementById('stat_total');
+  const sessionEl = document.getElementById('stat_session');
+  const totalLabel = document.getElementById('stat_total_label');
+
+  pywebview.api.get_stats().then(function (stats) {
+    // Drop a response that arrived after the user switched accounts, so stale
+    // data can't overwrite the card for the now-active account.
+    if (stats && stats.account && stats.account.id !== currentAccountId) return;
+    if (!stats || !stats.derived) {
+      if (totalEl) totalEl.textContent = '—';
+      if (sessionEl) sessionEl.textContent = '—';
+      if (totalLabel) totalLabel.textContent = 'Total points';
+      return;
+    }
+    const d = stats.derived;
+    if (totalEl) totalEl.textContent = _fmt_points(d.total_points, d.is_estimate);
+    if (totalLabel) {
+      totalLabel.textContent = d.is_estimate ? 'Total points (est.)' : 'Total points';
+    }
+    if (sessionEl) {
+      // Show the real balance delta as a signed "+N"; estimates get a "~".
+      const flag = d.session_is_estimate ? true : 'delta';
+      sessionEl.textContent = _fmt_points(d.session_points, flag);
+    }
+  }).catch(function (err) {
+    console.error('refresh_stats_ui failed:', err);
+  });
 }
 
 function set_hide_browser_toggle_enabled(enabled) {
@@ -731,6 +814,17 @@ function build_schedule_card(item) {
   const body = document.createElement('div');
   body.className = 'schedule-card-body';
 
+  // Dashboard variant row (applies to any run, not just scheduled ones):
+  // which Microsoft Rewards dashboard this account uses for the Daily Set.
+  const DASHBOARD_VARIANTS = ['auto', 'legacy', 'new'];
+  const dashDefault = DASHBOARD_VARIANTS.includes(item.dashboard_variant)
+    ? item.dashboard_variant : 'auto';
+  body.appendChild(make_select_field('Rewards dashboard', 'schedule-dashboard', dashDefault, [
+    { value: 'auto', label: 'Auto (detect)' },
+    { value: 'legacy', label: 'Legacy' },
+    { value: 'new', label: 'New' },
+  ]));
+
   // Advanced scheduling sub-toggle row.
   const advRow = document.createElement('label');
   advRow.className = 'sched-adv-row';
@@ -832,6 +926,28 @@ function build_schedule_card(item) {
   return card;
 }
 
+function make_select_field(labelText, className, value, options) {
+  const wrap = document.createElement('div');
+  wrap.className = 'form-field';
+
+  const label = document.createElement('label');
+  label.textContent = labelText;
+  wrap.appendChild(label);
+
+  const select = document.createElement('select');
+  select.className = className;
+  options.forEach(opt => {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    if (opt.value === value) o.selected = true;
+    select.appendChild(o);
+  });
+  wrap.appendChild(select);
+
+  return wrap;
+}
+
 function make_form_field(labelText, inputType, className, value, opts) {
   const wrap = document.createElement('div');
   wrap.className = 'form-field';
@@ -869,6 +985,9 @@ async function save_settings() {
     const runDuration = parseInt(card.querySelector('.schedule-run-duration').value, 10);
     const queriesPerHour = parseInt(card.querySelector('.schedule-queries-per-hour').value, 10);
     const runTime = card.querySelector('.schedule-run-time').value;
+    const dashEl = card.querySelector('.schedule-dashboard');
+    const dashboardVariant = dashEl && ['auto', 'legacy', 'new'].includes(dashEl.value)
+      ? dashEl.value : 'auto';
 
     if (enabled) {
       if (isNaN(pc) || pc < 0 || pc > 130) {
@@ -901,6 +1020,7 @@ async function save_settings() {
 
     payloads.push({
       id: id,
+      dashboardVariant: dashboardVariant,
       payload: {
         enabled: enabled,
         advancedScheduling: advancedScheduling,
@@ -914,6 +1034,12 @@ async function save_settings() {
   }
 
   try {
+    // Persist each account's dashboard choice first (independent of the
+    // schedule payload; kept out of the results[] slicing below).
+    await Promise.all(payloads.map(p =>
+      pywebview.api.set_dashboard_variant(p.id, p.dashboardVariant)
+    ));
+
     const scheduleCalls = payloads.map(p =>
       pywebview.api.set_schedule(p.id, p.payload)
     );
@@ -977,14 +1103,18 @@ function refresh_account_ui() {
     // Start button.
     const startBtn = document.getElementById('start_btn');
     const current = accountsCache.find(a => a.id === currentAccountId);
-    const shouldEnable = Boolean(current && current.first_setup_done);
+    const busy = driverWarmingUp || balanceFetching;
+    const shouldEnable = Boolean(current && current.first_setup_done) && !busy;
     const label = startBtn.querySelector('.btn-label');
     if (!label || label.textContent === 'Start run' || label.textContent === 'Loading…') {
       startBtn.disabled = !shouldEnable;
-      if (label) label.textContent = 'Start run';
+      if (label) label.textContent = busy ? 'Loading…' : 'Start run';
     }
 
     update_status_indicator();
+
+    // Stats are per-account — refresh the compact card for the new selection.
+    refresh_stats_ui();
 
     // Re-render the accounts management modal list if open.
     if (typeof render_accounts_section === 'function') {
@@ -1003,6 +1133,17 @@ let loaderInterval;
 
 function start_loader() {
   clearInterval(loaderInterval);
+
+  // Block Start until the warmup finishes.
+  driverWarmingUp = true;
+  const startBtn = document.getElementById('start_btn');
+  if (startBtn) {
+    startBtn.disabled = true;
+    const label = startBtn.querySelector('.btn-label');
+    if (label && (label.textContent === 'Start run' || label.textContent === 'Loading…')) {
+      label.textContent = 'Loading…';
+    }
+  }
 
   const tryShowLoader = () => {
     pywebview.api.check_driver_status().then(isLoading => {
@@ -1028,6 +1169,7 @@ function start_loader() {
 
 function stop_loader() {
   clearInterval(loaderInterval);
+  driverWarmingUp = false;
 
   const inline = document.getElementById('inline_loader');
   if (inline) inline.remove();

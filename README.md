@@ -4,7 +4,7 @@
 
 ![Downloads](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/safarsin/023d6f9c9aa602f6afbb7f5c1e2fe9ee/raw/downloads.json)
 
-An advanced, set-and-forget automation tool for Microsoft Rewards. AutoRewarder performs Bing searches for PC and mobile point collection, collects Daily Sets, and uses mathematically driven, human-like input simulation (W3C Actions, Bezier curves, and smart scrolling).
+An advanced, set-and-forget automation tool for Microsoft Rewards (supporting both the legacy and new dashboards). AutoRewarder performs Bing searches for PC and mobile point collection, completes Daily Sets and More Activities, and uses mathematically driven, human-like input simulation (W3C Actions, Bezier curves, and smart scrolling).
 
 Built with a robust Python/Selenium backend, it offers two modes of operation: a sleek HTML/CSS/JS frontend wrapped in a native window via pywebview, and a headless runner (CLI) for scheduled background runs and automation scripts. Packaged as an executable Windows app (via Inno Setup) for a seamless, plug-and-play experience.
 
@@ -51,22 +51,33 @@ Clone this repo, create virtual environment, and run `python AutoRewarder.py`.
 
 | Perform Searches | App Demo |
 | :---: | :---: |
-|<img src="assets/screenshots/perform_demo.gif">|<img src="assets/screenshots/main_window_demo_3.4.gif">|
+|<img src="assets/screenshots/perform_demo.gif">|<img src="assets/screenshots/app_demo_v4.0.gif">|
 
-|Daily Sets| Tab Switching |
+| Daily Sets (New Dashboard) & Claim action | Tab Switching |
 | :---: | :---: |
-|<img src="assets/screenshots/daily_set.gif">|<img src="assets/screenshots/tab_perform.gif">|
+|<img src="assets/screenshots/daily_sets_demo_v4.0.gif">|<img src="assets/screenshots/tab_perform.gif">|
+
+<details>
+  <summary><b>View Legacy Dashboard Demo (click to expand)</b></summary>
+
+  <br>
+
+  | Daily Sets (Legacy Dashboard) |
+  | :---: |
+  |<img src="assets/screenshots/daily_set.gif">|
+
+</details>
 
 > <sub>*Demo is sped up for viewing purposes. Actual execution includes randomized delays and pauses to mimic human behavior.*</sub>
 
-| Main Window | Settings |
+| Main Window & Account Management | Settings |
 | :---: | :---: |
-| <img src="assets/screenshots/main_window_v3.4.png"> | <img src="assets/screenshots/settings_v3.4_1.png"> |
-| <img src="assets/screenshots/main_1.png"> | <img src="assets/screenshots/settings_v3.4_2.png"> |
+| <img src="assets/screenshots/main_window_v4.0.jpg"> | <img src="assets/screenshots/settings_1_v4.0.jpg"> |
+| <img src="assets/screenshots/account_management_v4.0.jpg"> | <img src="assets/screenshots/settings_2_v4.0.jpg"> |
 
-| History | Account Management |
+| History | Statistics Dashboard |
 | :---: | :---: |
-| <img src="assets/screenshots/history_window.png"> | <img src="assets/screenshots/accounts_v3.4.png"> |
+| <img src="assets/screenshots/history_window.png"> | <img src="assets/screenshots/stats_v4.0.jpg"> |
 
 ---
 
@@ -87,7 +98,7 @@ Clone this repo, create virtual environment, and run `python AutoRewarder.py`.
 - **Browser**: Microsoft Edge (driver managed by Selenium Manager)
 - **.NET Framework**: 4.8 or higher (automatically checked by installer)
 - **RAM**: Minimum 512 MB (1 GB recommended)
-- **Disk Space**: ~50 MB
+- **Disk Space**: ~100 MB
 
 ---
 
@@ -103,7 +114,10 @@ Clone this repo, create virtual environment, and run `python AutoRewarder.py`.
 - Start with Windows/Linux toggle (autostart)
 - Live terminal-like logs with update notifications (GitHub Releases)
 - Local history view per account (date, time, query, status)
+- Statistics dashboard: real scraped points balance, per-run earnings, lifetime activity counters, and a multi-account recap
 - Safe recovery for corrupted settings/history files
+- Detailed analytics window (lifetime counters, real balances, per-day activity charts)
+- Compact stats UI (total points and last run earnings card on main window)
 
 **Automation & Core Logic:**
 - OS-level daily autostart (launches headless runs at per-account scheduled times)
@@ -117,6 +131,7 @@ Clone this repo, create virtual environment, and run `python AutoRewarder.py`.
 - Natural mouse movement/clicking (W3C Actions)
 - Daily Set task collection (runs once per day, per account)
 - Separate browser profile per account
+- Smart dashboard selection (automatic detection and switching between legacy and new versions at runtime)
 
 **Developer & Code Quality:**
 - Advanced documentation (comprehensive docstrings and detailed guides)
@@ -212,6 +227,8 @@ AutoRewarder/
 │   ├── index.html             # Main window UI
 │   ├── history.html           # History view UI
 │   ├── history.css            # History view styling
+│   ├── dashboard.html         # Statistics dashboard UI
+│   ├── dashboard.css          # Statistics dashboard styling
 │   ├── script.js              # Frontend logic and bridge calls
 │   ├── settings.js            # Settings page logic and bridge calls
 │   ├── styles.css             # App styling
@@ -236,10 +253,13 @@ AutoRewarder/
 │   ├── search/                # Bing query execution + history
 │   │   ├── engine.py          # Search loop with human-like delays
 │   │   └── history.py         # Per-account search history JSON
-│   └── dailytasks/            # Rewards daily-set + more-activities automation
-│       ├── runner.py          # DailySet orchestrator + status persistence
-│       ├── card.py            # RewardsCard: DOM checks + click + tab dance
-│       └── card_js.py         # JS heuristics + CardStatus enum
+│   ├── dailytasks/            # Rewards daily-set + more-activities automation
+│   │   ├── runner.py          # DailySet orchestrator + status persistence
+│   │   ├── new_dashboard.py   # The New Dashboard support
+│   │   ├── card.py            # RewardsCard: DOM checks + click + tab dance
+│   │   └── card_js.py         # JS heuristics + CardStatus enum
+│   └── stats/                 # Per-account statistics
+│       └── manager.py         # StatsManager + points-balance scraper
 ├── AutoRewarder.py            # Python backend and webview window
 ├── AutoRewarder_CLI.py        # Headless runner (multi-account aware)
 ├── AutoRewarder.spec          # PyInstaller build spec
@@ -277,6 +297,7 @@ accounts/
 		EdgeProfile/   # Separate Edge profile for WebDriver
 		history.json   # Search history (date, time, query, status)
 		status.json    # Daily Set completion status (per-day)
+		stats.json     # Statistics: scraped points balance + activity counters
 		meta.json      # Per-account metadata (first_setup_done, schedule)
 background_log.txt # Logs from the background runner (for debugging)
 ```
@@ -308,11 +329,12 @@ For common issues and solutions, see the [Troubleshooting](USER_GUIDE.md#trouble
 - [x] Brand New UI
 - [x] System tray (close-to-tray)
 - [x] Hide browser mode (headless UI)
+- [x] Statistics dashboard (points tracking, session summaries)
+- [x] Daily "Claim" actions
+- [x] The New Dashboard Support
 - [ ] Simulated human typos during search input
 - [ ] Region-specific search query datasets (US, UK, CA, AU, IN, etc.)
-- [ ] Statistics dashboard (points tracking, session summaries)
 - [ ] Browser choice (Chrome, Firefox support in addition to Edge)
-- [ ] Daily "Claim" actions
 - [ ] Keyboard shortcuts
 
 ---
@@ -333,6 +355,6 @@ You are responsible for your own usage.
 
 ## Support
 
-If you found this project helpful and would like to support my work, you can buy me a coffee here:
+If you found this project helpful and would like to support it, you can buy me a coffee here:
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/safarsin)

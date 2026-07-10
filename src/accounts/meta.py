@@ -22,6 +22,15 @@ DEFAULT_ACCOUNT_SCHEDULE = {
     "run_time": "09:00",
 }
 
+# Which Microsoft Rewards dashboard this account uses. Microsoft is rolling out
+# a new React/Next.js dashboard that has a completely different DOM from the
+# legacy `mee-rewards-*` one; the Daily Set automation must branch on it.
+#   "auto"   -> detect at runtime which dashboard rendered (default)
+#   "legacy" -> force the historical mee-rewards-* dashboard
+#   "new"    -> force the new Next.js dashboard
+DASHBOARD_VARIANTS = ("auto", "legacy", "new")
+DEFAULT_DASHBOARD_VARIANT = "auto"
+
 
 def default_account_schedule():
     """Return a fresh copy of the default per-account schedule."""
@@ -168,3 +177,33 @@ class AccountMetaManager:
         meta = self.get_meta()
         meta["schedule"] = sched
         self.save_meta(meta)
+
+    def get_dashboard_variant(self):
+        """
+        Return this account's Rewards dashboard variant.
+
+        Returns one of DASHBOARD_VARIANTS, defaulting to DEFAULT_DASHBOARD_VARIANT
+        when unset or invalid (backward compatible: pre-existing meta.json files
+        simply resolve to "auto").
+        """
+        variant = self.get_meta().get("dashboard_variant")
+        if variant in DASHBOARD_VARIANTS:
+            return variant
+        return DEFAULT_DASHBOARD_VARIANT
+
+    def set_dashboard_variant(self, variant):
+        """
+        Persist this account's Rewards dashboard variant.
+
+        Args:
+            variant: one of DASHBOARD_VARIANTS ("auto", "legacy", "new").
+
+        Returns:
+            bool: True if persisted, False if the value was rejected.
+        """
+        if variant not in DASHBOARD_VARIANTS:
+            return False
+        meta = self.get_meta()
+        meta["dashboard_variant"] = variant
+        self.save_meta(meta)
+        return True
