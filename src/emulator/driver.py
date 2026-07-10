@@ -1,7 +1,10 @@
 """Edge WebDriver setup for per-account profiles."""
 
 from selenium import webdriver
-from selenium.webdriver.edge.options import Options
+from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+
+chrome_driver_names = ["chrome", "brave", "opera"]
 
 
 class DriverManager:
@@ -13,7 +16,7 @@ class DriverManager:
     different profile_path.
     """
 
-    def __init__(self, profile_path=None, hide_browser=False):
+    def __init__(self, logger=None, profile_path=None, hide_browser=False):
         """
         Args:
             profile_path (str | None): Absolute path to the Selenium --user-data-dir
@@ -21,8 +24,20 @@ class DriverManager:
                 case setup_driver will raise, since there is nothing to launch.
             hide_browser (bool): Whether to run the browser in headless mode.
         """
+        self._logger = logger
         self.profile_path = profile_path
         self.hide_browser = hide_browser
+
+    def _log(self, message):
+        """
+        Log a message using the provided logger, if available.
+
+        Args:
+            message (str): The message to log.
+        """
+
+        if self._logger:
+            self._logger(message)
 
     # Realistic iPhone UA so Microsoft Rewards credits the searches as mobile.
     MOBILE_USER_AGENT = (
@@ -58,40 +73,46 @@ class DriverManager:
                 "Create or select an account first."
             )
 
-        if headless is None:
-            headless = self.hide_browser
+        def setup_driver_options(options):
+            options.add_argument(f"--user-data-dir={self.profile_path}")
+            options.add_argument("--profile-directory=Default")
+            options.add_argument("--disable-blink-features=AutomationControlled")
+            options.add_argument("--no-default-browser-check")
+            options.add_argument("--no-first-run")
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
 
-        options = Options()
-        options.add_argument(f"--user-data-dir={self.profile_path}")
-        options.add_argument("--profile-directory=Default")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--no-default-browser-check")
-        options.add_argument("--no-first-run")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            if mobile:
+                options.add_argument(f"--user-agent={self.MOBILE_USER_AGENT}")
+                window_size = self.MOBILE_WINDOW_SIZE
+            else:
+                window_size = self.DESKTOP_WINDOW_SIZE
+            options.add_argument(f"--window-size={window_size}")
 
-        if mobile:
-            options.add_argument(f"--user-agent={self.MOBILE_USER_AGENT}")
-            window_size = self.MOBILE_WINDOW_SIZE
-        else:
-            window_size = self.DESKTOP_WINDOW_SIZE
-        options.add_argument(f"--window-size={window_size}")
+            if disable_identity:
+                # Kill the various Chromium/Edge paths that silently sign the user
+                # in with the Windows-level Microsoft identity.
+                options.add_argument(
+                    "--disable-features=msImplicitSignin,AadSsoUrlInterceptionEnabled,"
+                    "WebOtpBackendAuto,IdentityConsistency,msIdentityWebSignIn,"
+                    "msEdgeIdentitySyncInterception"
+                )
+                options.add_argument("--disable-sync")
 
-        if disable_identity:
-            # Kill the various Chromium/Edge paths that silently sign the user
-            # in with the Windows-level Microsoft identity.
-            options.add_argument(
-                "--disable-features=msImplicitSignin,AadSsoUrlInterceptionEnabled,"
-                "WebOtpBackendAuto,IdentityConsistency,msIdentityWebSignIn,"
-                "msEdgeIdentitySyncInterception"
-            )
-            options.add_argument("--disable-sync")
+            if headless:
+                options.add_argument("--headless=new")
+                options.add_argument("--disable-gpu")
+                options.add_argument("--window-position=-32000,-32000")
 
-        if headless:
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--window-position=-32000,-32000")
+            return options
 
-        _driver = webdriver.Edge(options=options)
+        try:
+            options = setup_driver_options(EdgeOptions())
+            _driver = webdriver.Edge(options=options)
+        except Exception:
+            self._log("Could not launch Edge driver. Trying Chrome driver")
+
+            options = setup_driver_options(ChromeOptions())
+            _driver = webdriver.Chrome(options=options)
 
         if mobile:
             # Turn the session into a genuine mobile one at the engine level.
