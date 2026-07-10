@@ -4,8 +4,6 @@ from selenium import webdriver
 from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 
-chrome_driver_names = ["chrome", "brave", "opera"]
-
 
 class DriverManager:
     """
