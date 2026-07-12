@@ -10,7 +10,7 @@ import os
 import platform
 import sys
 
-CURRENT_VERSION = "v3.4"
+CURRENT_VERSION = "v4.0"
 REPO = "safarsin/AutoRewarder"
 
 PLATFORM_NAME = platform.system()
@@ -29,7 +29,7 @@ elif PLATFORM_NAME == "Windows":
         os.environ["USERPROFILE"], "AppData", "Local", "AutoRewarder"
     )
 
-# Get MacoS app directory
+# Get MacOS app directory
 elif PLATFORM_NAME == "Darwin":
     APP_DIR = os.path.join(
         os.path.expanduser("~"), "Library", "Application Support", "AutoRewarder"
@@ -62,6 +62,7 @@ if not os.path.exists(APP_DIR):
 #         EdgeProfile/
 #         history.json
 #         status.json
+#         stats.json         (per-account: points balance + activity counters)
 #         meta.json          (per-account: first_setup_done)
 ACCOUNTS_DIR = os.path.join(APP_DIR, "accounts")
 GLOBAL_SETTINGS_PATH = os.path.join(APP_DIR, "settings.json")
@@ -97,6 +98,11 @@ def history_path(account_id):
 def status_path(account_id):
     """Return the daily-set status.json path for a given account."""
     return os.path.join(account_dir(account_id), "status.json")
+
+
+def stats_path(account_id):
+    """Return the statistics stats.json path for a given account."""
+    return os.path.join(account_dir(account_id), "stats.json")
 
 
 def account_meta_path(account_id):
