@@ -244,6 +244,8 @@ class SearchEngine:
                     new_tabs = [tab for tab in driver.window_handles if tab != main_tab]
                     for tab in new_tabs:
                         try:
+                            if tab not in driver.window_handles:
+                                continue
                             driver.switch_to.window(tab)
                             driver.close()
                         except WebDriverException as e:

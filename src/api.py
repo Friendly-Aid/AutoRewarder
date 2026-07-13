@@ -816,6 +816,7 @@ class AutoRewarderAPI:
             candidate = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
             if os.path.exists(candidate):
                 python_exe = candidate
+
         entry = os.path.join(BASE_DIR, "AutoRewarder.py")
         return f'"{python_exe}" "{entry}" --headless --account {account_id}'
 
@@ -1249,10 +1250,10 @@ class AutoRewarderAPI:
                 subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
             except Exception:
                 pass
-
             result = subprocess.run(
                 ["launchctl", "load", plist_path], capture_output=True
             )
+
             if result.returncode != 0:
                 self.log(
                     f"[ERROR] launchctl enable failed for {desc_label}: "
