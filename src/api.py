@@ -831,7 +831,7 @@ class AutoRewarderAPI:
         return f"{_SYSTEMD_UNIT_NAME}-{account_id}"
 
     def _macos_launchagent_base(self, account_id):
-        """Base name for the systemd service + timer of a specific account."""
+        """Base name for the per-account macOS LaunchAgent plist/label."""
         return f"{_MACOS_LAUNCHAGENT_NAME}.{account_id}"
 
     # ------------------------------------------------------------------
@@ -1273,7 +1273,7 @@ class AutoRewarderAPI:
             return False
 
     def _remove_macos_launchagent(self, account_id):
-        """Disable + delete an account's systemd service + timer."""
+        """Disable + delete an account's per-account macOS LaunchAgent plist."""
         try:
             base = self._launchagent_user_dir()
             unit_base = self._macos_launchagent_base(account_id)
