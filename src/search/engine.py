@@ -186,6 +186,7 @@ class SearchEngine:
                 chosen_tab = random.choices(tabs_config, weights=weights, k=1)[0]
 
                 if chosen_tab["name"] != "All":
+                    main_tab = driver.current_window_handle
                     tab_element = None
 
                     # Check if news tab exists, if it doesn't choose Images or Videos
@@ -198,8 +199,6 @@ class SearchEngine:
 
                     self._log(f"Chosen behavior: Switch to {chosen_tab['name']}")
                     try:
-                        main_tab = driver.current_window_handle
-
                         # Find the tab element using its id
                         if not tab_element:
                             xpath = f"//nav/ul/li[@id='{chosen_tab['id']}']/a"
@@ -244,8 +243,13 @@ class SearchEngine:
                 if chosen_tab["name"] != "All":
                     new_tabs = [tab for tab in driver.window_handles if tab != main_tab]
                     for tab in new_tabs:
+                        if tab not in driver.window_handles:
+                            continue
                         try:
                             driver.switch_to.window(tab)
+                            current_url = driver.current_url.lower()
+                            if "bing.com" not in current_url:
+                                continue
                             driver.close()
                         except WebDriverException as e:
                             short_error = str(e).split("\n")[0][:28]
