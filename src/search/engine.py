@@ -243,10 +243,15 @@ class SearchEngine:
                 if chosen_tab["name"] != "All":
                     new_tabs = [tab for tab in driver.window_handles if tab != main_tab]
                     for tab in new_tabs:
+                        if tab not in driver.window_handles:
+                            continue
                         try:
                             if tab not in driver.window_handles:
                                 continue
                             driver.switch_to.window(tab)
+                            current_url = driver.current_url.lower()
+                            if "bing.com" not in current_url:
+                                continue
                             driver.close()
                         except WebDriverException as e:
                             short_error = str(e).split("\n")[0][:28]
