@@ -243,8 +243,6 @@ class SearchEngine:
                 if chosen_tab["name"] != "All":
                     new_tabs = [tab for tab in driver.window_handles if tab != main_tab]
                     for tab in new_tabs:
-                        if tab not in driver.window_handles:
-                            continue
                         try:
                             if tab not in driver.window_handles:
                                 continue
