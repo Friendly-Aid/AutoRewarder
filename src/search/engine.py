@@ -3,6 +3,7 @@
 import json
 import random
 import time
+from urllib.parse import urlparse
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import NoSuchElementException, WebDriverException
 from selenium.webdriver.common.by import By
@@ -245,8 +246,14 @@ class SearchEngine:
                     for tab in new_tabs:
                         try:
                             driver.switch_to.window(tab)
-                            current_url = driver.current_url.lower()
-                            if "bing.com" not in current_url:
+                            hostname = (
+                                (urlparse(driver.current_url).hostname or "")
+                                .lower()
+                                .rstrip(".")
+                            )
+                            if hostname != "bing.com" and not hostname.endswith(
+                                ".bing.com"
+                            ):
                                 continue
                             driver.close()
                         except WebDriverException as e:
