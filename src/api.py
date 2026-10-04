@@ -1450,12 +1450,27 @@ class AutoRewarderAPI:
             with open(plist_path, "wb") as fh:
                 plistlib.dump(plist_content, fh)
 
+            enabled = subprocess.run(
+                ["launchctl", "print-disabled", f"gui/{os.getuid()}"],
+                capture_output=True,
+                text=True,
+            )
+
+            if re.search(rf'"{re.escape(label)}"\s*=>\s*disabled', enabled.stdout):
+                subprocess.run(
+                    ["launchctl", "enable", f"gui/{os.getuid()}/{label}"], check=True
+                )
+
             try:
-                subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+                subprocess.run(
+                    ["launchctl", "bootout", f"gui/{os.getuid()}", plist_path],
+                    capture_output=True,
+                )
             except Exception:
                 pass
             result = subprocess.run(
-                ["launchctl", "load", plist_path], capture_output=True
+                ["launchctl", "bootstrap", f"gui/{os.getuid()}", plist_path],
+                capture_output=True,
             )
 
             if result.returncode != 0:
