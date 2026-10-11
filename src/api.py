@@ -875,21 +875,6 @@ class AutoRewarderAPI:
                     return True
             except Exception:
                 pass
-        elif system == "Darwin":
-            launch_agents_dir = os.path.join(
-                os.path.expanduser("~"), "Library", "LaunchAgents"
-            )
-            try:
-                for entry in os.listdir(launch_agents_dir):
-                    name = entry.lower()
-                    if name.endswith(".plist") and (
-                        name.startswith("com.autorewarder.")
-                        or name.startswith("autorewarder")
-                        or name.startswith("com.github.safarsin.autorewarder")
-                    ):
-                        return True
-            except Exception:
-                pass
         return False
 
     # Bumped whenever the format of registered scheduled tasks changes in
@@ -1456,9 +1441,10 @@ class AutoRewarderAPI:
                 text=True,
             )
 
-            if re.search(rf'"{re.escape(label)}"\s*=>\s*disabled', enabled.stdout):
+            if re.search(rf'"{re.escape(unit_base)}"\s*=>\s*disabled', enabled.stdout):
                 subprocess.run(
-                    ["launchctl", "enable", f"gui/{os.getuid()}/{label}"], check=True
+                    ["launchctl", "enable", f"gui/{os.getuid()} {unit_base}"],
+                    check=True,
                 )
 
             try:
